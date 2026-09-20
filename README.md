@@ -85,5 +85,4 @@ La documentation est dans [`docs/fr_FR/index.md`](docs/fr_FR/index.md).
 ```bash
 php tests/run.php            # rejeu hors ligne, sans réseau ni Jeedom
 php tests/check-classes.php  # contrôles par réflexion contre le cœur installé
-deploy-plugin.sh             # déploiement vers /var/www/html/plugins
 ```
