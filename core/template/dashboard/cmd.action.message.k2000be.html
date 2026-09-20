@@ -1,0 +1,339 @@
+<div class="cmd cmd-widget" data-type="action" data-subtype="message" data-template="k2000be" data-pending="0" data-cmd_id="#id#" data-cmd_uid="#uid#" data-version="#version#" data-eqLogic_id="#eqLogic_id#">
+  <div class="title #hide_name#">
+    <div class="cmdName">#name_display#</div>
+  </div>
+  <div class="content">
+    <div class="k2wScan"><div class="k2wScanBar"></div></div>
+    <div class="k2wReponse"></div>
+    <div class="k2wAttente">
+      <div class="k2wAttenteTitre"></div>
+      <div class="k2wAttenteBoutons">
+        <a class="btn btn-sm btn-danger k2wConfirmer">{{Confirmer}}</a>
+        <a class="btn btn-sm btn-default k2wAnnuler">{{Annuler}}</a>
+      </div>
+    </div>
+    <div class="k2wSaisie">
+      <input type="text" class="form-control input-sm k2wTexte" placeholder="#message_placeholder#" value="#message#" autocomplete="off">
+      <a class="btn btn-sm btn-default k2wEnvoyer" title="{{Envoyer la demande à l'assistant}}"><i class="fas fa-paper-plane"></i></a>
+    </div>
+  </div>
+  <template>
+    <div>message_placeholder : {{Texte grisé de la ligne de saisie}}</div>
+    <div>message : {{Demande préremplie}}</div>
+  </template>
+  <script>
+    (function () {
+      /* Une seule feuille de style pour toutes les tuiles du plugin, posée au
+         premier rendu. Le CSS d'un plugin n'est pas chargé sur le dashboard, et
+         les règles .content du cœur n'existent pas côté mobile : le gabarit
+         doit se suffire à lui-même. Aucune couleur en dur, tout vient du thème
+         — sauf le rouge du balayage, qui est le sujet. */
+      if (!document.getElementById('k2000beWidgetCss')) {
+        var css = document.createElement('style')
+        css.id = 'k2000beWidgetCss'
+        css.textContent = [
+          '.cmd-widget[data-template="k2000be"]{display:flex;flex-direction:column;align-items:stretch;width:100%}',
+          '.cmd-widget[data-template="k2000be"] .cmdName{font-size:12px;line-height:16px;font-weight:400;color:var(--txt-color)}',
+          '.cmd-widget[data-template="k2000be"] .content{display:flex;flex-direction:column;align-items:stretch;width:100%;padding:0 6px 4px;gap:4px}',
+          /* Le même gabarit sert le mobile : les trois boutons doivent rester
+             cliquables au doigt, pas seulement à la souris. */
+          '.cmd-widget[data-template="k2000be"] .btn{min-height:34px;display:inline-flex;align-items:center;justify-content:center;gap:4px}',
+          '.cmd-widget[data-template="k2000be"] .k2wScan{position:relative;height:4px;border-radius:var(--border-radius);background:var(--btnEq-default-color);overflow:hidden}',
+          '.cmd-widget[data-template="k2000be"] .k2wScanBar{position:absolute;top:0;left:0;width:24%;height:100%;opacity:0;background:linear-gradient(90deg,rgba(200,30,30,0) 0%,var(--al-danger-color) 50%,rgba(200,30,30,0) 100%)}',
+          /* Le balayage ne vit que pendant l'attente : une animation permanente
+             devient un bruit de fond qu'on ne regarde plus. */
+          '.cmd-widget[data-template="k2000be"][data-busy="1"] .k2wScanBar{opacity:1;animation:k2wSweep 1.4s ease-in-out infinite alternate}',
+          '@keyframes k2wSweep{from{left:-24%}to{left:100%}}',
+          '@media (prefers-reduced-motion: reduce){.cmd-widget[data-template="k2000be"][data-busy="1"] .k2wScanBar{animation:none;left:38%}}',
+          /* La réponse s'étire : un ascenseur ici serait un défilement de plus
+             à l'intérieur de celui de la tuile, que le doigt attrape à la
+             place du bon. */
+          '.cmd-widget[data-template="k2000be"] .k2wReponse{font-size:.82em;line-height:1.35;color:var(--txt-color);white-space:pre-wrap;word-break:break-word}',
+          '.cmd-widget[data-template="k2000be"] .k2wReponse.k2wVide{opacity:.55;font-style:italic}',
+          /* Le texte posé sur --al-warning-color est celui que le cœur emploie
+             lui-même au-dessus de cette couleur (.alert-warning). */
+          '.cmd-widget[data-template="k2000be"] .k2wAttente{display:none;padding:4px 6px;border-radius:var(--border-radius);background:var(--al-warning-color);color:var(--linkHoverLight-color);font-size:.8em}',
+          '.cmd-widget[data-template="k2000be"][data-pending="1"] .k2wAttente{display:block}',
+          '.cmd-widget[data-template="k2000be"] .k2wAttenteTitre{font-weight:700;margin-bottom:3px}',
+          '.cmd-widget[data-template="k2000be"] .k2wAttenteBoutons{display:flex;flex-wrap:wrap;gap:6px}',
+          '.cmd-widget[data-template="k2000be"] .k2wAttenteBoutons .btn{flex:1 1 auto}',
+          '.cmd-widget[data-template="k2000be"] .k2wSaisie{display:flex;align-items:center;gap:4px}',
+          '.cmd-widget[data-template="k2000be"] .k2wTexte{flex:1 1 auto;min-width:0;min-height:34px}'
+        ].join('')
+        document.head.appendChild(css)
+      }
+
+      var k2wCmd = document.querySelector('.cmd[data-cmd_uid="#uid#"]')
+      if (!is_object(k2wCmd)) { return }
+
+      var k2wReponse = k2wCmd.querySelector('.k2wReponse')
+      var k2wQuestion = k2wCmd.querySelector('.k2wAttenteTitre')
+      var k2wTexte = k2wCmd.querySelector('.k2wTexte')
+      var k2wEnvoyer = k2wCmd.querySelector('.k2wEnvoyer')
+      var k2wConfirmer = k2wCmd.querySelector('.k2wConfirmer')
+      var k2wAnnuler = k2wCmd.querySelector('.k2wAnnuler')
+
+      /*
+       * Les commandes voisines de l'assistant.
+       *
+       * Le gabarit ne connaît que la commande « Demander » ; la réponse, l'état
+       * d'attente et les deux boutons de confirmation vivent sur d'autres
+       * commandes du même équipement. Leurs identifiants sont donc demandés au
+       * cœur, une fois, puis retrouvés par leur identifiant interne — qui, lui,
+       * ne change jamais, contrairement au nom que l'utilisateur peut modifier.
+       */
+      var k2wIds = {}
+
+      function k2wBouton(_bouton, _bloque) {
+        if (!is_object(_bouton)) { return }
+        if (_bloque) {
+          _bouton.classList.add('disabled')
+          return
+        }
+        _bouton.classList.remove('disabled')
+      }
+
+      /* Les trois boutons partent ensemble : pendant les vingt secondes que
+         peut durer un appel, aucun d'eux ne doit passer une seconde demande. */
+      function k2wOccupe(_actif) {
+        k2wCmd.setAttribute('data-busy', _actif ? '1' : '0')
+        k2wBouton(k2wEnvoyer, _actif)
+        k2wBouton(k2wConfirmer, _actif)
+        k2wBouton(k2wAnnuler, _actif)
+      }
+
+      function k2wAfficherReponse(_valeur) {
+        var texte = String(init(_valeur, '')).trim()
+        if (texte === '') {
+          k2wReponse.classList.add('k2wVide')
+          k2wReponse.textContent = '{{Aucune réponse pour le moment.}}'
+          return
+        }
+        k2wReponse.classList.remove('k2wVide')
+        /* Texte, jamais balisage : cette phrase vient du modèle, donc
+           d'Internet. */
+        k2wReponse.textContent = texte
+      }
+
+      /*
+       * Le nom de l'assistant, tel que son propriétaire l'a écrit.
+       *
+       * La tuile est le seul endroit que voit celui qui n'ouvre jamais la page
+       * du plugin : elle doit nommer l'équipement qui demande, et non le
+       * plugin, sans quoi « K2000 souhaite… » s'adresse à quelqu'un qui a
+       * appelé le sien « KITT ». Le cœur ne remplace pas le nom de
+       * l'équipement dans un gabarit de commande : il est relu dans l'étiquette
+       * de la tuile parente, écrite de la même façon sur le bureau et sur le
+       * mobile, et demandé au cœur si cette étiquette manque — une commande
+       * posée seule sur un design, par exemple.
+       */
+      var k2wNom = ''
+      var k2wTitres = ''
+
+      function k2wNomVoisin() {
+        if (typeof k2wCmd.closest !== 'function') { return '' }
+        var bloc = k2wCmd.closest('.eqLogic-widget')
+        if (bloc === null) { return '' }
+        var etiquette = bloc.querySelector('.widget-name')
+        if (etiquette === null) { return '' }
+        /* L'étiquette porte aussi la pièce, le lien vers la configuration et
+           l'icône de rafraîchissement : on travaille sur une copie pour les en
+           retirer sans toucher à l'affichage. */
+        var copie = etiquette.cloneNode(true)
+        var parasites = copie.querySelectorAll('.object_name, .panelLink, .refresh, i')
+        for (var i = 0; i < parasites.length; i++) {
+          parasites[i].parentNode.removeChild(parasites[i])
+        }
+        return copie.textContent.replace(/\s+/g, ' ').trim()
+      }
+
+      function k2wQui() {
+        return (k2wNom === '') ? '{{L\'assistant}}' : k2wNom
+      }
+
+      /*
+       * Le bandeau ne s'ouvre qu'une fois la phrase connue.
+       *
+       * Les trois lectures — la réponse, l'attente, son objet — partent
+       * ensemble et reviennent dans l'ordre qu'elles veulent. Sans ce verrou,
+       * « pending » arrivé le premier ouvrirait deux boutons sous un titre
+       * vide, et l'on confirmerait sans savoir quoi : exactement ce que la
+       * confirmation est censée empêcher.
+       */
+      var k2wAttendue = false
+      var k2wQuestionLue = false
+
+      function k2wAfficherAttente(_valeur) {
+        k2wAttendue = (_valeur == 1)
+        k2wCmd.setAttribute('data-pending', (k2wAttendue && k2wQuestionLue) ? '1' : '0')
+      }
+
+      /* Pose le titre du bandeau sans rien affirmer sur son état : un bandeau
+         qui dit seulement « votre accord est attendu » pousse à confirmer sans
+         savoir sur quoi. La liste des titres vient de la commande
+         « question ». */
+      function k2wPoserQuestion(_valeur) {
+        k2wTitres = String(init(_valeur, '')).trim()
+        if (k2wTitres === '') {
+          k2wQuestion.textContent = k2wQui() + ' {{attend votre accord avant d\'agir.}}'
+          return
+        }
+        k2wQuestion.textContent = k2wQui() + ' {{souhaite :}} ' + k2wTitres + '. {{Confirmer ?}}'
+      }
+
+      /* Appelée au retour de la lecture de « question » : la phrase est dès
+         lors connue, fût-elle vide, et le bandeau peut donc s'ouvrir. */
+      function k2wAfficherQuestion(_valeur) {
+        k2wPoserQuestion(_valeur)
+        k2wQuestionLue = true
+        k2wAfficherAttente(k2wAttendue ? 1 : 0)
+      }
+
+      /* Lecture d'une commande d'information : execCmd sur une info rend sa
+         valeur sans rien déclencher. */
+      function k2wLire(_id, _retour) {
+        if (!isset(_id) || _id === '') { return }
+        jeedom.cmd.execute({
+          id: _id,
+          notify: false,
+          error: function () {},
+          success: _retour
+        })
+      }
+
+      /* L'état complet de l'assistant, relu au cœur. Après un appel — qu'il
+         ait abouti ou non — c'est le serveur qui dit où l'on en est, jamais la
+         tuile. */
+      function k2wRelire() {
+        k2wLire(k2wIds.reply, k2wAfficherReponse)
+        k2wLire(k2wIds.pending, k2wAfficherAttente)
+        k2wLire(k2wIds.question, k2wAfficherQuestion)
+      }
+
+      function k2wAgir(_id) {
+        if (k2wCmd.getAttribute('data-busy') === '1') { return }
+        if (!isset(_id) || _id === '') {
+          jeedomUtils.showAlert({ message: '{{Commande introuvable : enregistrez l\'assistant pour que ses commandes soient créées.}}', level: 'warning' })
+          return
+        }
+        k2wOccupe(true)
+        /* Le bandeau se ferme dès le clic, comme sur la page du plugin : un
+           jeton ne vaut qu'une fois, et un bandeau qui reste affiché pendant
+           les vingt secondes de l'appel invite à recliquer — le second appel
+           répondant alors « aucune confirmation n'est en attente ». L'état
+           réel revient par k2wRelire(). */
+        k2wAttendue = false
+        k2wCmd.setAttribute('data-pending', '0')
+        jeedom.cmd.execute({
+          id: _id,
+          /* Le rappel d'erreur du cœur reçoit un objet, pas une chaîne :
+             l'afficher tel quel donnerait « [object Object] ». */
+          error: function (_erreur) {
+            k2wOccupe(false)
+            k2wRelire()
+            jeedomUtils.showAlert({ message: init(_erreur.message, _erreur), level: 'danger' })
+          },
+          success: function () {
+            k2wOccupe(false)
+            k2wRelire()
+          }
+        })
+      }
+
+      function k2wDemander() {
+        var texte = k2wTexte.value.trim()
+        if (texte === '') { return }
+        if (k2wCmd.getAttribute('data-busy') === '1') { return }
+
+        k2wOccupe(true)
+        k2wReponse.classList.add('k2wVide')
+        k2wReponse.textContent = '{{L\'assistant réfléchit… cela peut demander une minute.}}'
+
+        /*
+         * L'appel dure le temps de toute la boucle du plugin : consultation,
+         * décision, exécution, vérification. C'est long, et c'est normal — le
+         * balayage est là pour le dire.
+         */
+        jeedom.cmd.execute({
+          id: '#id#',
+          value: { title: '', message: texte },
+          error: function (_erreur) {
+            k2wOccupe(false)
+            k2wAfficherReponse('')
+            k2wPoserQuestion('')
+            jeedomUtils.showAlert({ message: init(_erreur.message, _erreur), level: 'danger' })
+          },
+          success: function () {
+            k2wOccupe(false)
+            k2wTexte.value = ''
+            k2wRelire()
+          }
+        })
+      }
+
+      k2wEnvoyer.addEventListener('click', function () { k2wDemander() })
+      k2wTexte.addEventListener('keydown', function (_event) {
+        if (_event.key !== 'Enter') { return }
+        _event.preventDefault()
+        k2wDemander()
+      })
+      k2wConfirmer.addEventListener('click', function () { k2wAgir(k2wIds.confirm) })
+      k2wAnnuler.addEventListener('click', function () { k2wAgir(k2wIds.cancel) })
+
+      k2wNom = k2wNomVoisin()
+      if (k2wNom === '' && typeof jeedom.eqLogic.byId === 'function') {
+        jeedom.eqLogic.byId({
+          id: '#eqLogic_id#',
+          error: function () {},
+          success: function (_eqLogic) {
+            if (!is_object(_eqLogic)) { return }
+            k2wNom = String(init(_eqLogic.name, '')).trim()
+            /* Le bandeau a pu être écrit avant ce retour : on le réécrit avec
+               la dernière phrase reçue, maintenant qu'on sait qui parle. */
+            k2wPoserQuestion(k2wTitres)
+          }
+        })
+      }
+
+      k2wAfficherReponse('')
+      k2wPoserQuestion('')
+
+      jeedom.eqLogic.getCmd({
+        id: '#eqLogic_id#',
+        error: function () {},
+        success: function (_cmds) {
+          for (var i = 0; i < _cmds.length; i++) {
+            k2wIds[_cmds[i].logicalId] = _cmds[i].id
+          }
+
+          k2wRelire()
+
+          /* Un assistant créé avant l'ajout de la commande « question » n'en a
+             pas : sans ce repli, son bandeau de confirmation n'apparaîtrait
+             plus jamais. */
+          if (!isset(k2wIds.question)) { k2wAfficherQuestion('') }
+
+          /* Le cœur pousse les changements de valeur aux fonctions inscrites
+             par identifiant de commande : sans cela la tuile ne verrait rien
+             d'une demande faite depuis un scénario ou depuis la page du
+             plugin. */
+          if (isset(k2wIds.reply)) {
+            jeedom.cmd.addUpdateFunction(k2wIds.reply, function (_options) {
+              k2wAfficherReponse(_options.value)
+            })
+          }
+          if (isset(k2wIds.pending)) {
+            jeedom.cmd.addUpdateFunction(k2wIds.pending, function (_options) {
+              k2wAfficherAttente(_options.value)
+            })
+          }
+          if (isset(k2wIds.question)) {
+            jeedom.cmd.addUpdateFunction(k2wIds.question, function (_options) {
+              k2wAfficherQuestion(_options.value)
+            })
+          }
+        }
+      })
+    })()
+  </script>
+</div>

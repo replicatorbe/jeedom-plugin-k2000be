@@ -1,0 +1,33 @@
+{
+    "id": "k2000be",
+    "name": "K2000",
+    "pluginVersion": "0.1",
+    "description": {
+        "fr_FR": "Un assistant en langage naturel pour la maison. Vous dites « je vais me coucher » ; l'assistant consulte l'état des pièces, décide, exécute les commandes qu'on lui a autorisées, vérifie le résultat et raconte ce qu'il a fait. Il s'appuie sur l'API OpenAI et sur le mécanisme d'outils du modèle : le modèle ne fait que demander, le plugin reste seul juge. Chaque commande Jeedom est interdite par défaut ; l'administrateur autorise explicitement celles que l'assistant peut employer, et marque comme sensibles celles qui exigent une confirmation humaine avant de partir. Utilisable depuis la page du plugin, depuis un widget, et depuis un scénario.",
+        "en_US": "A natural language assistant for the home. Say \"I am going to bed\" and the assistant reads the state of each room, decides, runs the commands it has been allowed to run, checks the result and reports what it did. It relies on the OpenAI API and on the model's tool calling: the model only asks, the plugin alone decides. Every Jeedom command is forbidden by default; the administrator explicitly allows the ones the assistant may use, and marks as sensitive those requiring human confirmation. Usable from the plugin page, from a widget and from a scenario."
+    },
+    "licence": "AGPL",
+    "author": "sMug (Jérôme Fafchamps)",
+    "require": "4.4",
+    "requireOsVersion": "11",
+    "category": "automatisation",
+    "index": "k2000be",
+    "hasDependency": 0,
+    "hasOwnDeamon": 0,
+    "maxDependancyInstallTime": 5,
+    "eventjs": 0,
+    "issue": "https://github.com/replicatorbe/jeedom-plugin-k2000be/issues",
+    "documentation": "https://github.com/replicatorbe/jeedom-plugin-k2000be/blob/master/docs/#language#/index.md",
+    "documentation_beta": "https://github.com/replicatorbe/jeedom-plugin-k2000be/blob/beta/docs/#language#/index.md",
+    "changelog": "https://github.com/replicatorbe/jeedom-plugin-k2000be/blob/master/docs/#language#/changelog.md",
+    "changelog_beta": "https://github.com/replicatorbe/jeedom-plugin-k2000be/blob/beta/docs/#language#/changelog.md",
+    "language": [
+        "fr_FR"
+    ],
+    "compatibility": [
+        "smart",
+        "rpi",
+        "docker",
+        "diy"
+    ]
+}

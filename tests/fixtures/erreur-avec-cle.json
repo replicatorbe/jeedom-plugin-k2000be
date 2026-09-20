@@ -1,0 +1,9 @@
+{
+    "error": {
+        "status": 400,
+        "message": "Invalid request sent with header Authorization: Bearer sk-proj-rejeuK2000beSecret0123456789 and gateway key cle-passerelle-9f2b7c4d1e.",
+        "type": "invalid_request_error",
+        "param": "messages",
+        "code": "invalid_request"
+    }
+}

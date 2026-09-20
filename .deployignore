@@ -1,0 +1,12 @@
+# Exclusions propres au plugin k2000be, ajoutées à celles de deploy-plugin.sh.
+# Un motif rsync par ligne.
+
+# Le rejeu hors ligne sert au développement : il n'a rien à faire dans la
+# racine web.
+tests/
+
+# Les conversations et le journal sont produits par l'installation. Les exclure
+# les protège aussi du --delete : un déploiement ne doit pas effacer l'historique
+# des échanges de l'utilisateur.
+data/conversations/
+data/journal/

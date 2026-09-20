@@ -1,0 +1,24 @@
+# Fichiers propres à l'installation, jamais versionnés
+core/config/common.config.php
+
+# Conversations et journal produits à l'exécution
+data/conversations/
+data/journal/
+
+# Journaux et fichiers de processus
+*.log
+*.pid
+
+# Environnements de développement
+.vscode/
+.project
+.remote-sync.json
+sftp-config.json
+nbproject/
+node_modules/
+test.php
+
+# Systèmes de fichiers
+.DS_Store
+Thumbs.db
+*.php~
