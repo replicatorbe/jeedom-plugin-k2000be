@@ -10,3 +10,7 @@ tests/
 # des échanges de l'utilisateur.
 data/conversations/
 data/journal/
+
+# Les copies de travail des agents (worktrees) : une copie complète du dépôt,
+# qui n'a rien à faire dans la racine web.
+.claude/

@@ -1,5 +1,29 @@
 # Changelog
 
+## Prochaine version
+
+- L'alerte automatique ne se joue plus dans le cron minute. Le cœur de Jeedom
+  exécute les tâches minute de tous les plugins l'une après l'autre : une levée
+  de doute de trente secondes retenait celles des autres plugins, et au-delà de
+  trois passages qui se chevauchent le cœur désignait K2000 comme le plugin qui
+  bloque. La détection reste au cron ; la levée de doute part dans une tâche de
+  fond du cœur, lancée aussitôt, et se rabat sur l'ancien fonctionnement si la
+  tâche ne peut pas partir — une alerte perdue coûte plus cher qu'un cron en
+  retard. Une alerte qui arrive pendant un tour en cours attend qu'il se termine.
+- L'invite système va du plus stable au plus changeant : l'état de la maison et
+  l'heure passent en fin d'invite. OpenAI met en cache le début commun des
+  requêtes ; l'heure, placée en deuxième ligne, changeait chaque minute et
+  privait de cache tout ce qui la suivait.
+- Les jetons servis depuis ce cache, facturés moins cher, sont relevés et
+  affichés : « dont N en cache », par demande et dans le bilan du journal.
+- Le modèle par défaut passe de `gpt-4o-mini` à `gpt-6-luna`, plus récent et
+  moins cher. Le plugin envoie désormais à chaque modèle les paramètres qu'il
+  accepte dès le premier appel — `max_completion_tokens` et
+  `reasoning_effort: none` pour les modèles récents, sans lequel gpt-6-luna
+  refuse les outils — et le rattrapage sait aussi retirer `reasoning_effort`.
+  Une installation restée sur le réglage par défaut change de modèle à la mise à
+  jour ; pour garder l'ancien, écrire `gpt-4o-mini` dans le champ Modèle.
+
 ## 0.1 — 20/09/2026
 
 Première version.
