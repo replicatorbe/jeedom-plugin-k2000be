@@ -179,6 +179,26 @@ foreach ($fichiers as $fichier) {
     }
 }
 
+/* ------------------------------------------------------------------ 6 ---
+ * L'alerte automatique part dans une tâche de fond du coeur
+ * (k2000be::planifierAlerte), et le rejeu ne connaît de la classe cron que son
+ * bouchon. Une méthode renommée ou disparue d'une version à l'autre du coeur
+ * ne se verrait donc nulle part hors ligne : cron() l'attraperait, jouerait
+ * l'alerte sur place en repli, et le seul symptôme serait le retour des crons
+ * bloqués que la tâche de fond existe pour éviter. */
+$appelees = array('setClass', 'setFunction', 'setOption', 'setOnce', 'setSchedule', 'setTimeout',
+                  'setLastRun', 'save', 'run', 'remove', 'getId', 'convertDateToCron');
+if (!class_exists('cron')) {
+    $problems[] = 'classe cron du coeur introuvable — l\'alerte automatique sera jouée sur place.';
+} else {
+    foreach ($appelees as $nom) {
+        if (!method_exists('cron', $nom)) {
+            $problems[] = 'cron::' . $nom . '() absente du coeur — la tâche de fond de l\'alerte '
+                . 'ne peut pas être lancée, l\'alerte sera jouée sur place.';
+        }
+    }
+}
+
 /* ---------------------------------------------------------------- BILAN --- */
 if (empty($problems)) {
     echo "Contrôles du coeur : aucun problème sur les " . count($fichiers) . " fichiers de classes.\n";

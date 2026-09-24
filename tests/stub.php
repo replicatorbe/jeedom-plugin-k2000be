@@ -721,3 +721,107 @@ function creerCommande($_id, $_eqLogic, $_nom, $_type, $_sousType, $_options = a
     cmd::$toutes[$_id] = $cmd;
     return $cmd;
 }
+
+/* ================================================================= TÂCHES */
+
+/*
+ * La table des tâches du cœur, réduite à ce que le plugin y fait : planifier
+ * une tâche « once » et la lancer aussitôt (k2000be::planifierAlerte).
+ *
+ * run() ne joue RIEN, et c'est tout l'intérêt : dans le cœur, run() lance
+ * jeeCron.php en arrière-plan et rend la main sur-le-champ. Un bouchon qui
+ * appellerait la fonction dans run() ferait passer pour différée une alerte
+ * jouée dans cron() — l'exact défaut que la tâche de fond corrige. Les tâches
+ * lancées attendent donc dans $lancees que le rejeu les joue lui-même, comme
+ * le ferait jeeCron.php : $classe::$fonction($options), puis effacement de la
+ * tâche « once ».
+ *
+ * $panne fait échouer le prochain save(), pour éprouver le repli.
+ */
+class cron {
+    public static $taches = array();
+    public static $lancees = array();
+    public static $suivant = 1;
+    public static $panne = false;
+
+    public $id = null;
+    public $class = '';
+    public $function = '';
+    public $option = null;
+    public $once = 0;
+    public $schedule = '';
+    public $timeout = 0;
+    public $lastRun = '';
+
+    public static function convertDateToCron($_date) {
+        return date('i', $_date) . ' ' . date('H', $_date) . ' ' . date('d', $_date) . ' ' . date('m', $_date) . ' *';
+    }
+
+    public function getId() { return $this->id; }
+    public function getClass() { return $this->class; }
+    public function getFunction() { return $this->function; }
+    public function getOnce() { return $this->once; }
+    public function getSchedule() { return $this->schedule; }
+    public function getTimeout() { return $this->timeout; }
+    public function getLastRun() { return $this->lastRun; }
+
+    /* Comme le cœur : les options sont stockées en JSON et relues décodées,
+     * ce qui éprouve au passage qu'elles survivent à l'aller-retour. */
+    public function getOption() { return json_decode($this->option ?? '', true); }
+
+    public function setClass($_v) { $this->class = $_v; return $this; }
+    public function setFunction($_v) { $this->function = $_v; return $this; }
+    public function setOption($_v) { $this->option = json_encode($_v, JSON_UNESCAPED_UNICODE); return $this; }
+    public function setOnce($_v) { $this->once = $_v; return $this; }
+    public function setSchedule($_v) { $this->schedule = $_v; return $this; }
+    public function setTimeout($_v) { $this->timeout = $_v; return $this; }
+    public function setLastRun($_v) { $this->lastRun = $_v; }
+
+    public function save() {
+        if (self::$panne) {
+            self::$panne = false;
+            throw new Exception('Rejeu : la table des tâches refuse l\'écriture.');
+        }
+        if ($this->id === null) {
+            $this->id = self::$suivant++;
+        }
+        self::$taches[$this->id] = $this;
+        return true;
+    }
+
+    public function run($_noErrorReport = false) {
+        self::$lancees[] = $this->id;
+    }
+
+    public function remove($_arreter = true) {
+        unset(self::$taches[$this->id]);
+        return true;
+    }
+
+    /* Ce que ferait jeeCron.php pour chaque tâche lancée. Rend le nombre de
+     * tâches jouées. */
+    public static function jouerLancees() {
+        $jouees = 0;
+        while (!empty(self::$lancees)) {
+            $id = array_shift(self::$lancees);
+            if (!isset(self::$taches[$id])) {
+                continue;
+            }
+            $tache = self::$taches[$id];
+            $classe = $tache->getClass();
+            $fonction = $tache->getFunction();
+            $classe::$fonction($tache->getOption());
+            if ((int) $tache->getOnce() === 1) {
+                $tache->remove(false);
+            }
+            $jouees++;
+        }
+        return $jouees;
+    }
+
+    public static function vider() {
+        self::$taches = array();
+        self::$lancees = array();
+        self::$panne = false;
+    }
+}

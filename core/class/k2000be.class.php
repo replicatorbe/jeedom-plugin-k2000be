@@ -346,6 +346,25 @@ class k2000be extends eqLogic {
     const REPOS_MIN = 1;
     const REPOS_MAX = 1440;
 
+    /*
+     * L'alerte se joue dans une tâche de fond, et ces trois bornes la tiennent.
+     *
+     * La patience : une alerte qui trouve l'assistant en plein tour attend son
+     * tour au lieu d'être refusée comme le serait une demande humaine. Personne
+     * n'est derrière la porte, et une levée de doute perdue parce que quelqu'un
+     * demandait la température du salon serait la pire des économies. Deux
+     * minutes couvrent un tour ordinaire ; au-delà, ask() refuse et le journal
+     * dit que l'alerte n'a pas pu passer.
+     *
+     * La péremption : une tâche du cœur planifiée « à cette minute-ci » porte
+     * une date sans année, et une tâche restée en base — processus tué avant la
+     * fin — repartirait l'an prochain à la même minute. Une alerte vieille de
+     * plus de dix minutes ne raconte plus rien d'utile : elle est jetée.
+     */
+    const ALERTE_PATIENCE = 120;
+    const ALERTE_PAS = 2;
+    const ALERTE_PEREMPTION = 600;
+
     /* ========================================================= AFFICHAGE */
 
     /* Le cœur ne fournit pas de date en français, et setlocale() dépend des
@@ -604,10 +623,147 @@ class k2000be extends eqLogic {
         }
         $message .= ' ' . __('Fais la levée de doute et dis ce qu\'il en est.', __FILE__);
 
+        $this->planifierAlerte($message);
+        return true;
+    }
+
+    /*
+     * Confie la levée de doute à une tâche de fond du cœur, lancée sur-le-champ.
+     *
+     * Pourquoi pas ask() ici même : le cœur joue les cron() de TOUS les
+     * plugins l'un après l'autre, dans un seul processus (plugin::cron). Une
+     * levée de doute dure dix à trente secondes, jusqu'à dix minutes de
+     * budget : pendant ce temps, les autres plugins attendent leur minute, et
+     * au quatrième chevauchement le cœur publie un message qui accuse K2000 et
+     * conseille de le désactiver. C'est l'argument du listener, en plus
+     * large : on ne tient pas un processus partagé pour un appel réseau.
+     *
+     * La tâche est celle que le cœur sait déjà jouer seul (jeeCron.php) :
+     * « once », elle s'efface après son passage ; run() la lance aussitôt en
+     * arrière-plan, sans attendre la minute suivante. Le message part tout
+     * fait dans les options : la détection a déjà eu lieu, les repères ont
+     * déjà avancé, la tâche n'a plus rien à décider.
+     *
+     * Le repli, s'il est impossible de lancer la tâche, est l'appel sur place,
+     * comme avant. Le choix est délibéré : le repère a déjà avancé, une alerte
+     * abandonnée ici ne ressortirait jamais — une intrusion passerait sous
+     * silence. Un cron() en retard d'une demi-minute, une fois, sur une box
+     * dont la table des tâches est en panne, coûte moins cher ; le cœur ne
+     * crie qu'au-delà de trois chevauchements.
+     */
+    private function planifierAlerte($_message) {
+        $tache = null;
+        try {
+            $tache = new cron();
+            $tache->setClass(__CLASS__);
+            $tache->setFunction('alerteDifferee');
+            /* Les options ne sont jamais vides : le cœur fusionnerait alors la
+             * tâche avec une autre de même classe et même fonction
+             * (cron::preSave), et deux alertes rapprochées n'en feraient
+             * qu'une. */
+            $tache->setOption(array(
+                'eqLogic_id' => (int) $this->getId(),
+                'message'    => $_message,
+                'planifiee'  => time(),
+            ));
+            $tache->setOnce(1);
+            $tache->setSchedule(cron::convertDateToCron(time()));
+            /* En minutes. Le budget d'un tour en ligne de commande, plus
+             * l'attente du verrou, plus une de marge : le maître des tâches ne
+             * doit pas tuer une levée de doute légitime, et
+             * maxExecTimeCrontask peut avoir été réglé plus court. */
+            $tache->setTimeout((int) ceil((self::BUDGET_DEFAUT + self::ALERTE_PATIENCE) / 60) + 1);
+            $tache->save();
+            /* La dernière exécution datée de cette minute : le maître des
+             * tâches, qui la verrait due, ne la lance pas une seconde fois
+             * (cron::isDue). Le cache ne se pose qu'une fois l'identifiant
+             * connu, donc après save(). */
+            $tache->setLastRun(date('Y-m-d H:i:s'));
+            $tache->run();
+            return true;
+        } catch (Throwable $e) {
+            self::tracer('error', sprintf(
+                __('%s : la tâche de fond de l\'alerte n\'a pas pu être lancée, l\'alerte est jouée sur place. %s', __FILE__),
+                $this->getHumanName(), $e->getMessage()));
+            /* Une tâche enregistrée mais pas lancée doit partir, sinon elle
+             * dormirait jusqu'à la même minute l'an prochain. La péremption la
+             * jetterait de toute façon, mais autant ne pas la laisser traîner. */
+            if (is_object($tache) && $tache->getId() != '') {
+                try {
+                    $tache->remove(false);
+                } catch (Throwable $f) {
+                }
+            }
+        }
         /* « alerte » et non « scenario » : le journal doit distinguer une
          * demande née d'un déclenchement d'une demande écrite par quelqu'un. */
-        $this->ask($message, array('utilisateur' => 'alerte'));
-        return true;
+        $this->ask($_message, array('utilisateur' => 'alerte'));
+        return false;
+    }
+
+    /*
+     * La levée de doute elle-même, jouée par jeeCron.php dans son propre
+     * processus.
+     *
+     * Rien ne doit en sortir en exception : le cœur laisserait alors la tâche
+     * en base, à l'état « error », et elle repartirait l'an prochain. Tout est
+     * donc attrapé et dit dans le journal du plugin — le seul que l'on lit
+     * quand une alerte n'est pas arrivée.
+     *
+     * Rend le résultat de ask(), ou null quand rien n'a été joué ; jeeCron n'en
+     * fait rien, le rejeu s'en sert.
+     */
+    public static function alerteDifferee($_options = array()) {
+        try {
+            $id = (is_array($_options) && isset($_options['eqLogic_id'])) ? (int) $_options['eqLogic_id'] : 0;
+            $message = (is_array($_options) && isset($_options['message'])) ? trim((string) $_options['message']) : '';
+            $planifiee = (is_array($_options) && isset($_options['planifiee'])) ? (int) $_options['planifiee'] : 0;
+            if ($id <= 0 || $message === '') {
+                self::tracer('error', __('Alerte différée sans assistant ni message : rien n\'a été joué.', __FILE__));
+                return null;
+            }
+            if ($planifiee <= 0 || (time() - $planifiee) > self::ALERTE_PEREMPTION) {
+                self::tracer('info', sprintf(__('Alerte périmée jetée sans être jouée : %s', __FILE__), $message));
+                return null;
+            }
+
+            /* Supprimé ou désactivé entre la détection et maintenant : il n'y
+             * a plus personne pour faire la levée de doute, et ce n'est pas
+             * une erreur. assistant() refuse déjà un équipement d'un autre
+             * plugin. */
+            $eqLogic = self::assistant($id);
+            if (!is_object($eqLogic) || (int) $eqLogic->getIsEnable() !== 1) {
+                self::tracer('info', sprintf(
+                    __('Alerte abandonnée : l\'assistant %s n\'existe plus ou est désactivé.', __FILE__), $id));
+                return null;
+            }
+
+            /* Attendre la fin d'un tour en cours plutôt que se faire refuser.
+             * On ne garde pas le verrou : ask() le prend lui-même, et le
+             * rendre ici puis le reprendre là laisse une fenêtre d'un instant.
+             * Si un humain s'y glisse, ask() refuse et le journal le dit —
+             * c'est le même refus qu'avant, devenu rare au lieu d'ordinaire. */
+            $limite = time() + self::ALERTE_PATIENCE;
+            while (true) {
+                $verrou = $eqLogic->verrouiller();
+                if ($verrou !== false) {
+                    $eqLogic->deverrouiller($verrou);
+                    break;
+                }
+                if (time() >= $limite) {
+                    break;
+                }
+                sleep(self::ALERTE_PAS);
+            }
+
+            /* « alerte » et non « scenario » : le journal doit distinguer une
+             * demande née d'un déclenchement d'une demande écrite par
+             * quelqu'un. */
+            return $eqLogic->ask($message, array('utilisateur' => 'alerte'));
+        } catch (Throwable $e) {
+            self::tracer('error', __('Alerte différée interrompue :', __FILE__) . ' ' . $e->getMessage());
+            return null;
+        }
     }
 
     /*

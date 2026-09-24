@@ -558,6 +558,12 @@ trouve plus rien à confirmer.
 Le verrou vaut **par assistant** : deux assistants ne partagent ni mémoire ni
 conversation, et ne s'attendent donc pas l'un l'autre.
 
+Une seule demande fait exception : l'**alerte automatique**. Elle se joue en
+arrière-plan, personne n'attend derrière la porte, et une levée de doute perdue
+parce que quelqu'un demandait la température du salon serait la pire des
+économies. Elle attend donc la fin du tour en cours, deux minutes au plus ;
+au-delà, elle est refusée comme les autres et le journal le dit.
+
 ## Les statuts d'une demande
 
 Chaque demande se termine sur l'un de cinq statuts, publié dans la commande
@@ -1032,7 +1038,7 @@ posez vous-même — `check_alert`, `get_events` — reçoit sa réponse dans to
 cas : on a le droit de demander si quelqu'un est passé cette nuit sans avoir
 armé quoi que ce soit.
 
-Trois comportements valent d'être connus :
+Cinq comportements valent d'être connus :
 
 - **le premier passage n'alerte jamais** : il pose son repère et s'en va. Sans
   cela, cocher la case un matin ferait raconter la détection de l'avant-veille
@@ -1041,6 +1047,15 @@ Trois comportements valent d'être connus :
   mais il s'exécuterait dans le processus qui vient de publier la valeur —
   celui du plugin de vidéosurveillance — et un tour de conversation dure dix à
   trente secondes : ce serait bloquer un démon d'alarme pour gagner une minute ;
+- **la levée de doute se joue en arrière-plan.** Le contrôle de la minute ne
+  fait que détecter ; la demande au modèle part aussitôt dans une tâche de fond
+  du cœur, qui s'efface une fois jouée. Jeedom joue les tâches de la minute de
+  tous les plugins l'une après l'autre : une levée de doute tenue là les ferait
+  toutes attendre. Si cette tâche ne peut pas être lancée, l'alerte est jouée
+  sur place plutôt que perdue, et le journal du plugin le dit ;
+- une alerte qui trouve l'assistant **en plein tour** attend qu'il ait fini,
+  deux minutes au plus, au lieu d'être refusée comme le serait une demande
+  tapée à la main (voir *Une demande à la fois*) ;
 - les demandes nées d'un déclenchement sont journalisées sous l'utilisateur
   **`alerte`**, jamais sous un nom d'humain.
 
