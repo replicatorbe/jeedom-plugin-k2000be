@@ -3045,8 +3045,32 @@ $declenchee->valueDate = date('Y-m-d H:i:s', time() - 5);
 $declenchee->collectDate = $declenchee->valueDate;
 k2000beSecurite::oublier();
 rejeu::scenario(array(reponseTexte('CONFIRME. La règle NORD a tiré il y a une minute.')));
+cron::vider();
 check('un basculement neuf réveille l\'assistant', $kitt->surveiller(), true);
+
+/*
+ * Mais pas dans cron() : le cœur y joue les plugins l'un après l'autre, et une
+ * levée de doute de trente secondes ferait attendre tous les autres. Elle part
+ * dans une tâche de fond, lancée sur-le-champ, que le cœur joue seul.
+ */
+check('cron() n\'a pas appelé le modèle lui-même', count(rejeu::$charges), 0);
+check('une tâche de fond est planifiée', count(cron::$taches), 1);
+$tache = reset(cron::$taches);
+check('elle rappelle la méthode différée',
+    $tache->getClass() . '::' . $tache->getFunction(), 'k2000be::alerteDifferee');
+check('elle ne sert qu\'une fois', (int) $tache->getOnce(), 1);
+check('elle porte l\'assistant qui a vu passer l\'alerte',
+    $tache->getOption()['eqLogic_id'], (int) $kitt->getId());
+check('et elle est lancée aussitôt, sans attendre la minute suivante',
+    cron::$lancees, array($tache->getId()));
+check('sa dernière exécution est datée : le maître ne la relance pas',
+    $tache->getLastRun() !== '', true);
+check('son délai couvre le budget d\'un tour et l\'attente du verrou',
+    $tache->getTimeout() * 60 >= k2000be::BUDGET_DEFAUT + k2000be::ALERTE_PATIENCE, true);
+
+check('le cœur joue la tâche', cron::jouerLancees(), 1);
 check('et le modèle a bien été appelé', count(rejeu::$charges), 1);
+check('la tâche ponctuelle s\'est effacée', count(cron::$taches), 0);
 $demande = rejeu::charge(0)['messages'];
 check('la demande nomme l\'équipement qui a basculé',
     strpos($demande[count($demande) - 1]['content'], 'Detection NORD') !== false, true);
@@ -3078,6 +3102,7 @@ $declenchee->collectDate = $declenchee->valueDate;
 k2000beSecurite::oublier();
 rejeu::scenario(array(reponseTexte('RIEN.')));
 check('le repos échu, l\'alerte repart', $kitt->surveiller(), true);
+cron::jouerLancees();
 
 /* ---- Le garde-fou d'armement, fermé par défaut ---- */
 
@@ -3110,6 +3135,7 @@ $declenchee->collectDate = $declenchee->valueDate;
 k2000beSecurite::oublier();
 rejeu::scenario(array(reponseTexte('CONFIRME.')));
 check('maison armée, l\'alerte repart', $kitt->surveiller(), true);
+cron::jouerLancees();
 
 /*
  * Le cas qui motive le champ : on désigne l'alarme AVANT de l'avoir installée.
@@ -3146,6 +3172,86 @@ $declenchee->collectDate = $declenchee->valueDate;
 k2000beSecurite::oublier();
 rejeu::scenario(array(reponseTexte('RIEN.')));
 check('sans condition, l\'alerte part comme avant', $kitt->surveiller(), true);
+cron::jouerLancees();
+
+/* ---- La tâche de fond, vue de son côté ---- */
+
+/*
+ * La méthode différée rejoue ask() pour l'assistant nommé dans les options, et
+ * pour lui seul : pas « le premier assistant actif », qui serait le bon sur
+ * une maison à un assistant et le mauvais partout ailleurs.
+ */
+$michael = new k2000be();
+$michael->setName('Michael');
+$michael->setEqType_name('k2000be');
+$michael->id = 451;
+eqLogic::$tous[451] = $michael;
+$avantKitt = count(k2000beJournal::historique($kitt->getId(), 50));
+rejeu::scenario(array(reponseTexte('RIEN.')));
+$differee = k2000be::alerteDifferee(array(
+    'eqLogic_id' => 451, 'message' => 'Alerte : essai. Fais la levée de doute.', 'planifiee' => time(),
+));
+check('la méthode différée joue la demande', is_array($differee), true);
+check('le modèle est appelé une fois', count(rejeu::$charges), 1);
+check('au nom de l\'assistant désigné',
+    k2000beJournal::historique(451, 1)[0]['utilisateur'], 'alerte');
+check('et pas d\'un autre', count(k2000beJournal::historique($kitt->getId(), 50)), $avantKitt);
+
+/* Désactivé entre la détection et la tâche : personne ne fait la levée de
+ * doute, et ce n'est pas une panne. */
+$michael->setIsEnable(0);
+rejeu::scenario(array());
+log::vider();
+$differee = tenter('assistant désactivé', function () {
+    return k2000be::alerteDifferee(array('eqLogic_id' => 451, 'message' => 'Alerte.', 'planifiee' => time()));
+});
+check('un assistant désactivé ne joue rien', $differee, null);
+check('et n\'appelle personne', count(rejeu::$charges), 0);
+/* Supprimé comme le fait la page, conversation comprise : la purge, plus
+ * loin, compte ce qu'un assistant disparu laisse derrière lui. */
+$michael->remove();
+
+/* Supprimé : même chose, et surtout sans exception — jeeCron laisserait
+ * sinon la tâche en base, et elle repartirait l'an prochain. */
+$differee = tenter('assistant disparu', function () {
+    return k2000be::alerteDifferee(array('eqLogic_id' => 451, 'message' => 'Alerte.', 'planifiee' => time()));
+});
+check('un assistant disparu ne joue rien', $differee, null);
+check('sans appeler le modèle', count(rejeu::$charges), 0);
+check('et le journal du plugin dit pourquoi', strpos(log::texte(), 'n\'existe plus') !== false, true);
+
+/* Une tâche restée en base porte une date sans année : elle repartirait à la
+ * même minute l'an prochain. Une alerte périmée est jetée. */
+$differee = tenter('alerte périmée', function () use ($kitt) {
+    return k2000be::alerteDifferee(array('eqLogic_id' => (int) $kitt->getId(), 'message' => 'Alerte.',
+        'planifiee' => time() - k2000be::ALERTE_PEREMPTION - 60));
+});
+check('une alerte périmée n\'est pas jouée', $differee, null);
+check('et ne coûte rien', count(rejeu::$charges), 0);
+
+$differee = tenter('options vides', function () {
+    return k2000be::alerteDifferee(array());
+});
+check('des options vides ne jouent rien, sans exception', $differee, null);
+
+/*
+ * Le repli. La tâche ne peut pas être lancée : l'alerte est jouée sur place,
+ * comme avant. Le repère a déjà avancé, et une alerte abandonnée ne
+ * ressortirait jamais.
+ */
+$kitt->setConfiguration('alerte_derniere', 0);
+$declenchee->valueDate = date('Y-m-d H:i:s', time() + 60);
+$declenchee->collectDate = $declenchee->valueDate;
+k2000beSecurite::oublier();
+rejeu::scenario(array(reponseTexte('RIEN.')));
+cron::vider();
+cron::$panne = true;
+log::vider();
+check('table des tâches en panne : l\'alerte part quand même', $kitt->surveiller(), true);
+check('jouée sur place', count(rejeu::$charges), 1);
+check('sans tâche laissée derrière', count(cron::$taches) + count(cron::$lancees), 0);
+check('et le journal du plugin le dit', strpos(log::texte(), 'sur place') !== false, true);
+cron::vider();
 
 unset(cmd::$toutes[360]);
 unset(eqLogic::$tous[36]);
