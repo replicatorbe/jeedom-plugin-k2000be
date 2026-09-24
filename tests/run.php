@@ -919,6 +919,38 @@ check('l\'invite système n\'est pas mémorisée',
     k2000beJournal::charger($kitt->getId())['messages'][0]['role'], 'user');
 check('rien de la maison cachée n\'est parti chez OpenAI', fuites(rejeu::$charges), array());
 
+/*
+ * Le cache d'OpenAI ne reconnaît qu'un début strictement commun. D'un
+ * aller-retour à l'autre du même tour, la requête doit donc ne faire que
+ * s'allonger : même catalogue, même invite, mêmes messages, et du neuf
+ * seulement au bout.
+ */
+check('le second aller renvoie le même catalogue, au caractère près',
+    json_encode(rejeu::charge(1)['tools']) === json_encode(rejeu::charge(0)['tools']), true);
+check('et commence par la requête du premier, message pour message',
+    json_encode(array_slice(rejeu::charge(1)['messages'], 0, count(rejeu::charge(0)['messages'])))
+    === json_encode(rejeu::charge(0)['messages']), true);
+
+/* Un fournisseur qui ne dit rien de son cache — ce rejeu, un vieux modèle, une
+ * passerelle « compatible » — ne doit rien casser : zéro, et c'est tout. */
+check('sans cached_tokens, la part en cache vaut zéro', $retour['jetons']['cache'], 0);
+
+/* La part servie depuis le cache : relevée à chaque appel, cumulée sur le
+ * tour, et gardée jusqu'au journal. */
+$kitt->reset();
+$enCache = reponseOutils(array(array('outil' => 'list_rooms')), array(2000, 20));
+$enCache['usage']['prompt_tokens_details'] = array('cached_tokens' => 1536);
+$finCache = reponseTexte('Trois pièces.', array(2100, 30));
+$finCache['usage']['prompt_tokens_details'] = array('cached_tokens' => 1920, 'audio_tokens' => 0);
+rejeu::scenario(array($enCache, $finCache));
+$retour = $kitt->ask('Combien de pièces ?', array('utilisateur' => 'jerome'));
+check('la part en cache est relevée et cumulée', $retour['jetons']['cache'], 3456);
+check('sans rien changer au total', $retour['jetons']['total'], 4150);
+$derniere = k2000beJournal::historique($kitt->getId(), 1);
+check('et le journal la garde',
+    isset($derniere[0]['jetons']['cache']) ? $derniere[0]['jetons']['cache'] : null, 3456);
+$kitt->reset();
+
 /* Conversation neuve : ce qui suit compte les messages tool d'un seul tour, et
  * la mémoire du tour précédent en porte déjà. */
 $kitt->reset();
@@ -2599,10 +2631,13 @@ check('elles passent APRÈS les consignes générales, pour pouvoir les nuancer'
 /* Bornées, comme tout ce qui repart chez OpenAI à chaque demande. */
 $kitt->setConfiguration('consignes', str_repeat('consigne ', 400));
 $longue = $kitt->systemPrompt();
+/* La ligne seule : le résumé de la maison et l'heure la suivent désormais. */
 $debut = strpos($longue, 'Consignes propres à cet assistant');
+$fin = strpos($longue, "\n", $debut);
+$ligne = ($fin === false) ? substr($longue, $debut) : substr($longue, $debut, $fin - $debut);
 check('une consigne trop longue est coupée',
-    mb_strlen(mb_substr($longue, $debut)) <= k2000be::CONSIGNES_MAX + 120, true);
-check('et la coupe se voit', mb_substr(trim(mb_substr($longue, $debut)), -1), '…');
+    mb_strlen($ligne) <= k2000be::CONSIGNES_MAX + 120, true);
+check('et la coupe se voit', mb_substr(trim($ligne), -1), '…');
 
 /* Un second assistant ne voit pas celles du premier : c'est tout l'objet. */
 $sobre = new k2000be();
@@ -2616,6 +2651,50 @@ check('mais garde les consignes générales',
     strpos($sobre->systemPrompt(), 'Ne jamais parler du chat.') !== false, true);
 unset(eqLogic::$tous[449]);
 
+/*
+ * L'ordre de l'invite, du plus stable au plus changeant. OpenAI met en cache le
+ * début commun de deux requêtes, et s'arrête au premier caractère qui diffère :
+ * l'heure, qui change chaque minute, rendait neuf tout ce qui la suivait
+ * quand elle était la deuxième ligne.
+ */
+$kitt->setConfiguration('consignes', 'Tu fais des levées de doute.');
+reglage('maison_animaux', 'Un chat, qui circule la nuit.');
+reglage('contexte_maison', 1);
+$neufQuinze = mktime(9, 15, 0, 3, 12, 2026);
+$neufSeize = mktime(9, 16, 0, 3, 12, 2026);
+$avant = $kitt->systemPrompt($neufQuinze);
+$apres = $kitt->systemPrompt($neufSeize);
+$lignesInvite = explode("\n", $avant);
+check('l\'heure ferme l\'invite',
+    $lignesInvite[count($lignesInvite) - 1], 'Nous sommes le jeudi 12 mars 2026, il est 09:15.');
+$heure = strpos($avant, 'Nous sommes le ');
+check('après les règles', strpos($avant, 'Tu ne pilotes rien directement.') < $heure, true);
+check('après la fiche', strpos($avant, 'Animaux : ') < $heure, true);
+check('après les consignes générales', strpos($avant, 'Ne jamais parler du chat.') < $heure, true);
+check('après les consignes de l\'assistant', strpos($avant, 'Tu fais des levées de doute.') < $heure, true);
+check('le résumé de la maison vient après toutes les consignes',
+    strpos($avant, 'Tu fais des levées de doute.') < strpos($avant, 'État de la maison : '), true);
+check('et avant l\'heure', strpos($avant, 'État de la maison : ') < $heure, true);
+/* « qui priment sur les précédentes » doit rester vrai : aucune consigne après
+ * celles de l'assistant, seulement des constats. */
+$suite = substr($avant, strpos($avant, 'Consignes propres à cet assistant'));
+check('rien ne se dit « consigne » après celles de l\'assistant',
+    substr_count($suite, 'Consignes'), 1);
+
+/* Deux demandes à une minute d'écart : tout est commun, sauf l'heure. */
+$commun = 0;
+while ($commun < strlen($avant) && $commun < strlen($apres) && $avant[$commun] === $apres[$commun]) {
+    $commun++;
+}
+check('deux invites à une minute d\'écart ne diffèrent qu\'à l\'heure',
+    $commun >= strlen($avant) - strlen('09:15.'), true);
+check('soit un préfixe commun de l\'essentiel de l\'invite', $commun > 0.9 * strlen($avant), true);
+
+/* Le catalogue part avant l'invite : il doit être le même à chaque demande. */
+check('le catalogue d\'outils est identique d\'une demande à l\'autre',
+    json_encode(k2000beOutils::definitions($kitt)) === json_encode(k2000beOutils::definitions($kitt)), true);
+
+reglage('maison_animaux', '');
 $kitt->setConfiguration('consignes', '');
 reglage('prompt_extra', '');
 

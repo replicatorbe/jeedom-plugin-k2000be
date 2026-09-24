@@ -193,6 +193,21 @@ class k2000beOpenAI {
         $choix = $corps['choices'][0];
         $usage = isset($corps['usage']) && is_array($corps['usage']) ? $corps['usage'] : array();
 
+        /*
+         * La part de l'invite servie depuis le cache d'OpenAI. Elle est déjà
+         * comptée dans « invite » — c'en est un sous-ensemble, pas un poste de
+         * plus — et facturée moins cher. La garder dit si l'ordre de l'invite
+         * système paie vraiment : sans ce chiffre, rien ne distinguerait une
+         * demande servie aux trois quarts depuis le cache d'une demande payée
+         * plein pot. Absente des vieux modèles et de bien des passerelles
+         * « compatibles », elle vaut alors zéro.
+         */
+        $cache = 0;
+        if (isset($usage['prompt_tokens_details']) && is_array($usage['prompt_tokens_details'])
+            && isset($usage['prompt_tokens_details']['cached_tokens'])) {
+            $cache = (int) $usage['prompt_tokens_details']['cached_tokens'];
+        }
+
         return array(
             'message' => $choix['message'],
             'finish'  => isset($choix['finish_reason']) ? $choix['finish_reason'] : 'stop',
@@ -200,6 +215,7 @@ class k2000beOpenAI {
                 'invite'  => isset($usage['prompt_tokens']) ? (int) $usage['prompt_tokens'] : 0,
                 'reponse' => isset($usage['completion_tokens']) ? (int) $usage['completion_tokens'] : 0,
                 'total'   => isset($usage['total_tokens']) ? (int) $usage['total_tokens'] : 0,
+                'cache'   => $cache,
             ),
             'modele'  => isset($corps['model']) ? $corps['model'] : $modele,
         );

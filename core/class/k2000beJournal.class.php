@@ -754,7 +754,11 @@ class k2000beJournal {
     private static function normaliserEntree($_eqId, $_entree) {
         $entree = is_array($_entree) ? $_entree : array();
 
-        $jetons = array('invite' => 0, 'reponse' => 0, 'total' => 0);
+        /* « cache » est la part de l'invite servie depuis le cache d'OpenAI,
+         * déjà comprise dans « invite ». Une ligne écrite avant qu'on la
+         * relève n'en porte pas : elle vaut zéro, et l'interface ne dit rien
+         * plutôt qu'un « dont 0 en cache » qui ne veut rien dire. */
+        $jetons = array('invite' => 0, 'reponse' => 0, 'total' => 0, 'cache' => 0);
         if (isset($entree['jetons']) && is_array($entree['jetons'])) {
             foreach ($jetons as $cle => $rien) {
                 if (isset($entree['jetons'][$cle])) {

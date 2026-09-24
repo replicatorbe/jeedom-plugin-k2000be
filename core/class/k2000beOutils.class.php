@@ -232,6 +232,13 @@ class k2000beOutils {
      * disent au modèle comment s'en servir sobrement, et surtout qu'un refus
      * est normal. Sans cette dernière phrase, un modèle refusé réessaie, puis
      * invente une panne matérielle pour expliquer son échec.
+     *
+     * Le catalogue part AVANT les messages, en tête de chaque requête : c'est
+     * par lui que commence le préfixe qu'OpenAI met en cache. Il doit donc
+     * rester le même d'une demande à l'autre, au caractère près — un ordre
+     * fixe, écrit en dur, et aucune valeur qui dépende de l'heure, de la
+     * maison ou de l'état d'un équipement. Un nombre d'équipements glissé
+     * dans une description ferait repartir plein pot tout ce qui suit.
      */
     public static function definitions($_eqLogic = null) {
         $outils = array(
