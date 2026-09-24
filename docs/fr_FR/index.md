@@ -674,6 +674,30 @@ Ce qui le fait monter :
 Le bouton **Nouvelle conversation** vide la mémoire : c'est aussi un geste
 d'économie, à faire dès qu'on change de sujet.
 
+### Le cache d'OpenAI
+
+OpenAI garde de lui-même en mémoire le **début** des requêtes qu'il reçoit, dès
+qu'il dépasse un millier de jetons environ, et facture nettement moins cher la
+partie qu'il reconnaît. Il ne reconnaît qu'un début strictement identique :
+au premier caractère qui diffère, le reste se paie plein pot.
+
+Le plugin est rangé pour en profiter. Chaque requête commence par le catalogue
+des outils, qui ne change jamais, puis par l'invite système, construite **du
+plus stable au plus changeant** : le ton, la ville, les règles de conduite, le
+mode de sécurité, la fiche de la maison, les consignes supplémentaires, les
+consignes de l'assistant — puis, tout à la fin, le résumé de la maison et
+l'heure, qui change chaque minute. Viennent ensuite les échanges précédents,
+renvoyés tels qu'ils ont été écrits. Deux demandes rapprochées partagent ainsi
+presque tout leur début.
+
+Ce que le cache a réellement servi se lit dans l'onglet *Historique* : à côté
+des jetons d'une demande, « dont N en cache » donne la part de l'invite qu'OpenAI
+a reconnue. Elle est **comprise** dans le total, pas ajoutée. Rien ne s'affiche
+quand elle est nulle — un modèle ou une passerelle qui ne la déclarent pas, ou
+une ligne écrite par une version antérieure du plugin. La mémoire, elle, joue
+contre le cache une fois pleine : chaque nouvel échange en chasse le plus
+ancien, et le début de la conversation change avec lui.
+
 En tête de l'onglet *Historique*, une ligne totalise ce que les demandes
 affichées ont coûté : combien elles étaient, combien de jetons elles ont pris,
 et leur durée moyenne. Elle ne porte que sur les lignes sous vos yeux — changer
@@ -773,7 +797,8 @@ contraire. La fiche décrit l'ordinaire du logement ; les outils décrivent
 l'instant.
 
 Le champ **Consignes supplémentaires** existe toujours et n'a pas changé de
-rôle : il passe **après** la fiche, en fin d'invite système, et reste l'endroit
+rôle : il passe **après** la fiche, après toutes les autres consignes du
+plugin, et reste l'endroit
 des instructions qui ne sont pas des faits sur la maison — un ton, une manière
 de répondre, une règle de conduite.
 
@@ -850,7 +875,9 @@ serait envoyée, avec sa taille en caractères. Il enregistre d'abord parce que
 l'invite est construite à partir de la configuration enregistrée : c'est donc
 bien ce que vous venez de taper qui s'affiche. C'est le texte réel, pas un
 résumé : le ton, les consignes du plugin, la fiche assemblée à
-partir des seuls champs remplis, et vos consignes supplémentaires à la fin.
+partir des seuls champs remplis, vos consignes supplémentaires, puis le résumé
+de la maison et l'heure, placés en dernier parce qu'ils changent d'une demande
+à l'autre.
 
 C'est le moyen de vérifier par soi-même ce que cette documentation affirme —
 qu'un champ vide ne part pas, que la fiche est bien introduite comme
@@ -1063,7 +1090,7 @@ Dans *Configuration* (la clé à molette de la page du plugin).
 | Résumé de la maison | oui | évite deux ou trois appels d'outils au démarrage de chaque conversation, contre un peu de contexte à chaque demande |
 | Ton | `kitt` | `kitt` pour le ton de la série, `sobre` pour un assistant neutre |
 | Fiche de la maison | vide | sept champs facultatifs sur la maison vécue — qui y vit, animaux, logement, chauffage, habitudes, à ne jamais faire, véhicule électrique. Seuls les champs remplis partent. Voir *La fiche de la maison* |
-| Consignes supplémentaires | vide | vos propres instructions, ajoutées en fin d'invite système, **après** la fiche. « Ne jamais allumer le salon après 23 h » y a sa place — en sachant que c'est une consigne au modèle, pas une interdiction : celle-là se règle dans *Autorisations* |
+| Consignes supplémentaires | vide | vos propres instructions, ajoutées à l'invite système **après** la fiche et les consignes du plugin. « Ne jamais allumer le salon après 23 h » y a sa place — en sachant que c'est une consigne au modèle, pas une interdiction : celle-là se règle dans *Autorisations* |
 
 ### Ce qui arrive à une valeur hors bornes
 

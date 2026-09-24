@@ -563,7 +563,7 @@ function k2000beTourNode(_tour) {
       k2000beTexte(pied, '', ' ' + Math.round(parseFloat(_tour.duree) * 10) / 10 + ' {{s}}')
     }
     if (isset(_tour.jetons) && isset(_tour.jetons.total)) {
-      k2000beTexte(pied, '', ' · ' + _tour.jetons.total + ' {{jetons}}')
+      k2000beTexte(pied, '', ' · ' + _tour.jetons.total + ' {{jetons}}' + k2000beCache(_tour.jetons.cache))
     }
     if (pied.childNodes.length > 0) { bloc.appendChild(pied) }
   }
@@ -1734,7 +1734,7 @@ function k2000beLigneJournalNode(_ligne) {
     var invite = init(_ligne.jetons.invite, 0)
     var reponse = init(_ligne.jetons.reponse, 0)
     var total = init(_ligne.jetons.total, 0)
-    k2000beTexte(entete, '', ' · ' + total + ' {{jetons}}').title =
+    k2000beTexte(entete, '', ' · ' + total + ' {{jetons}}' + k2000beCache(_ligne.jetons.cache)).title =
       '{{Invite}} : ' + invite + ' · {{réponse}} : ' + reponse
   }
   bloc.appendChild(entete)
@@ -1752,6 +1752,19 @@ function k2000beLigneJournalNode(_ligne) {
 }
 
 /*
+ * La part des jetons d'invite servie depuis le cache d'OpenAI, à accoler au
+ * total : « (dont 1200 en cache) ». Elle est déjà comprise dans le total, d'où
+ * le « dont » — l'additionner serait compter deux fois. Rien quand elle est
+ * nulle ou absente : les lignes écrites avant qu'on la relève n'en portent pas,
+ * et un « dont 0 » sur chaque demande n'apprendrait rien à personne.
+ */
+function k2000beCache(_cache) {
+  var cache = parseInt(init(_cache, 0), 10) || 0
+  if (cache <= 0) { return '' }
+  return ' ({{dont}} ' + cache + ' {{en cache}})'
+}
+
+/*
  * Le bilan des lignes affichées : combien de demandes, ce qu'elles ont coûté,
  * ce qu'elles ont duré en moyenne.
  *
@@ -1763,12 +1776,14 @@ function k2000beLigneJournalNode(_ligne) {
 function k2000beBilanNode(_lignes) {
   var demandes = 0
   var jetons = 0
+  var cache = 0
   var duree = 0
   for (var i = 0; i < _lignes.length; i++) {
     if (String(init(_lignes[i].statut, '')) === 'TRONQUE') { continue }
     demandes++
     if (isset(_lignes[i].jetons) && isset(_lignes[i].jetons.total)) {
       jetons += parseInt(init(_lignes[i].jetons.total, 0), 10) || 0
+      cache += parseInt(init(_lignes[i].jetons.cache, 0), 10) || 0
     }
     if (is_numeric(_lignes[i].duree)) { duree += parseFloat(_lignes[i].duree) }
   }
@@ -1778,7 +1793,8 @@ function k2000beBilanNode(_lignes) {
   bilan.className = 'help-block'
   bilan.style.marginBottom = '8px'
   var moyenne = Math.round((duree / demandes) * 10) / 10
-  bilan.textContent = demandes + ' {{demandes}} · ' + jetons + ' {{jetons}} · ' + moyenne + ' {{s en moyenne}}'
+  bilan.textContent = demandes + ' {{demandes}} · ' + jetons + ' {{jetons}}' + k2000beCache(cache) +
+    ' · ' + moyenne + ' {{s en moyenne}}'
   bilan.title = '{{Sur les seules lignes affichées ici, et non sur tout le journal.}}'
   return bilan
 }

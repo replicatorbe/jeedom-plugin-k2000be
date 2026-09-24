@@ -1172,7 +1172,7 @@ class k2000be extends eqLogic {
         $statut = self::STATUT_SUCCESS;
         $reponse = '';
         $erreur = null;
-        $jetons = array('invite' => 0, 'reponse' => 0, 'total' => 0);
+        $jetons = array('invite' => 0, 'reponse' => 0, 'total' => 0, 'cache' => 0);
         $modele = trim((string) config::byKey('model', __CLASS__, k2000beOpenAI::MODELE_DEFAUT));
         $limite = false;
         $conclu = false;
@@ -1209,6 +1209,17 @@ class k2000be extends eqLogic {
         $identifiants = self::identifiantsConnus($messages);
 
         try {
+            /*
+             * L'invite est construite UNE fois par tour, et le catalogue aussi :
+             * d'un aller-retour à l'autre, la requête ne fait que s'allonger, et
+             * tout ce qui a déjà été envoyé repart à l'identique, octet pour
+             * octet — c'est la condition du cache d'OpenAI, qui ne reconnaît
+             * qu'un début strictement commun. Les messages mémorisés repartent
+             * eux aussi tels qu'ils ont été écrits : les résultats d'outils sont
+             * des chaînes figées par enJson(), les appels sont ceux que
+             * normaliserAppels() a déjà remis d'aplomb. D'une demande à l'autre,
+             * seule la fin de l'invite change — voir systemPrompt().
+             */
             $systeme = array('role' => 'system', 'content' => $this->systemPrompt());
 
             /* Le catalogue d'outils ne change pas d'un tour à l'autre : le
@@ -1250,6 +1261,7 @@ class k2000be extends eqLogic {
                 $jetons['invite'] += (int) $retour['usage']['invite'];
                 $jetons['reponse'] += (int) $retour['usage']['reponse'];
                 $jetons['total'] += (int) $retour['usage']['total'];
+                $jetons['cache'] += isset($retour['usage']['cache']) ? (int) $retour['usage']['cache'] : 0;
                 $modele = $retour['modele'];
 
                 $message = is_array($retour['message']) ? $retour['message'] : array();
@@ -2199,7 +2211,7 @@ class k2000be extends eqLogic {
             'statut'   => $_statut,
             'etapes'   => array(),
             'attente'  => null,
-            'jetons'   => array('invite' => 0, 'reponse' => 0, 'total' => 0),
+            'jetons'   => array('invite' => 0, 'reponse' => 0, 'total' => 0, 'cache' => 0),
             'modele'   => trim((string) config::byKey('model', __CLASS__, k2000beOpenAI::MODELE_DEFAUT)),
             'erreur'   => $_message,
         );
@@ -2558,7 +2570,32 @@ class k2000be extends eqLogic {
         return $types;
     }
 
-    public function systemPrompt() {
+    /*
+     * L'invite système, rangée du plus stable au plus changeant.
+     *
+     * L'ordre n'est pas seulement une affaire de sens, il est aussi une affaire
+     * de prix. OpenAI met de lui-même en cache le DÉBUT commun de deux
+     * requêtes — les outils, puis les messages dans l'ordre, dès mille vingt-
+     * quatre jetons environ — et facture ce début beaucoup moins cher, et le
+     * sert plus vite. Mais le cache s'arrête au premier octet qui diffère :
+     * tout ce qui vient après se paie plein pot.
+     *
+     * L'heure était la deuxième ligne. Elle change chaque minute, et chaque
+     * minute elle rendait neuf tout ce qui la suivait — les règles, la fiche,
+     * les consignes, puis toute la conversation. Elle passe donc en dernier,
+     * avec le résumé de la maison, qui bouge dès qu'on touche à un équipement
+     * ou à une autorisation. Ce qui reste devant ne change que lorsque
+     * quelqu'un modifie la configuration : le ton, la ville, les règles, le
+     * mode, la fiche, les consignes générales, puis celles de l'assistant.
+     *
+     * Ce qui passe derrière les consignes est fait de constats, pas de
+     * consignes : « qui priment sur les précédentes » reste vrai, puisque plus
+     * aucune consigne ne les suit.
+     *
+     * $_maintenant ne sert qu'au rejeu hors ligne, qui doit pouvoir construire
+     * deux invites à une minute d'écart sans attendre une minute.
+     */
+    public function systemPrompt($_maintenant = null) {
         $lignes = array();
 
         $persona = trim((string) config::byKey('persona', __CLASS__, 'kitt'));
@@ -2567,11 +2604,6 @@ class k2000be extends eqLogic {
         } else {
             $lignes[] = 'Tu es KITT, l\'assistant de cette maison, dans l\'esprit de la voiture intelligente de la série K2000 : courtois, direct, un brin formel. Tu n\'es jamais bavard et tu ne fais pas d\'humour appuyé.';
         }
-
-        $maintenant = time();
-        $date = self::JOURS[(int) date('w', $maintenant)] . ' ' . (int) date('j', $maintenant)
-            . ' ' . self::MOIS[(int) date('n', $maintenant)] . ' ' . date('Y', $maintenant);
-        $lignes[] = 'Nous sommes le ' . $date . ', il est ' . date('H:i', $maintenant) . '.';
 
         /* Jeedom connaît la ville de la box depuis sa page d'administration :
          * sans elle, le modèle situerait « il fait nuit » ou « ce soir » au
@@ -2627,19 +2659,6 @@ class k2000be extends eqLogic {
             $lignes[] = 'La maison est en mode simulation : une commande autorisée te sera rendue comme « simulated », c\'est-à-dire qu\'elle n\'est PAS partie. Annonce-la alors comme une simulation, jamais comme une action faite.';
         }
 
-        if ((int) config::byKey('contexte_maison', __CLASS__, 1) === 1) {
-            try {
-                $resume = trim((string) k2000beOutils::resumeMaison());
-                if ($resume !== '') {
-                    $lignes[] = 'État de la maison : ' . $resume;
-                }
-            } catch (Throwable $e) {
-                /* Un résumé indisponible n'empêche pas de répondre : le modèle
-                 * ira chercher par lui-même avec list_rooms. */
-                self::tracer('debug', $e->getMessage());
-            }
-        }
-
         /* La fiche de la maison vient avant les consignes libres : ce sont des
          * faits, et les consignes du propriétaire doivent pouvoir les nuancer
          * — l'ordre inverse ferait trancher le fait contre la consigne. */
@@ -2664,6 +2683,37 @@ class k2000be extends eqLogic {
         if ($propres !== '') {
             $lignes[] = 'Consignes propres à cet assistant, qui priment sur les précédentes : ' . $propres;
         }
+
+        /*
+         * Ici commence ce qui change d'une demande à l'autre. Rien de stable ne
+         * doit être ajouté en dessous : il perdrait le cache à chaque minute.
+         *
+         * Le résumé de la maison d'abord : il ne bouge qu'avec les équipements
+         * et les autorisations, et deux demandes rapprochées le partagent.
+         * C'est un décompte, pas une description : le faire passer après les
+         * consignes ne leur retire rien, là où la fiche, elle, doit rester
+         * devant elles pour qu'elles puissent la nuancer.
+         */
+        if ((int) config::byKey('contexte_maison', __CLASS__, 1) === 1) {
+            try {
+                $resume = trim((string) k2000beOutils::resumeMaison());
+                if ($resume !== '') {
+                    $lignes[] = 'État de la maison : ' . $resume;
+                }
+            } catch (Throwable $e) {
+                /* Un résumé indisponible n'empêche pas de répondre : le modèle
+                 * ira chercher par lui-même avec list_rooms. */
+                self::tracer('debug', $e->getMessage());
+            }
+        }
+
+        /* L'heure tout à la fin, puisqu'elle change chaque minute. Le modèle
+         * la lit aussi bien en dernière ligne qu'en deuxième : c'est un fait,
+         * et aucune consigne ne dépend de sa place. */
+        $maintenant = ($_maintenant === null) ? time() : (int) $_maintenant;
+        $date = self::JOURS[(int) date('w', $maintenant)] . ' ' . (int) date('j', $maintenant)
+            . ' ' . self::MOIS[(int) date('n', $maintenant)] . ' ' . date('Y', $maintenant);
+        $lignes[] = 'Nous sommes le ' . $date . ', il est ' . date('H:i', $maintenant) . '.';
 
         return implode("\n", $lignes);
     }
