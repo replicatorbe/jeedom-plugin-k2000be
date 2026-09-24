@@ -50,9 +50,24 @@ enregistre la configuration, interroge OpenAI avec la clé qui vient d'être
 enregistrée, et affiche le verdict à côté de lui. Tant qu'il ne répond pas
 favorablement, inutile d'aller plus loin.
 
-Le modèle par défaut est `gpt-4o-mini` : c'est le moins cher des modèles qui
-tiennent correctement le mécanisme d'outils. Le bouton **Enregistrer et voir les
+Le modèle par défaut est `gpt-5.4-mini` : c'est le plus récent des petits
+modèles qui tiennent le mécanisme d'outils tel que le plugin l'emploie, sans
+réglage de plus. Il coûte plus cher que `gpt-4o-mini`, livré jusqu'ici, mais se
+trompe moins souvent d'équipement. Le bouton **Enregistrer et voir les
 modèles**, sous le champ *Modèle*, liste ceux auxquels votre clé donne droit.
+
+Tous ne conviennent pas. Un modèle qui refuse `max_tokens` ou la température
+est rattrapé tout seul, au prix d'un premier appel refusé à chaque échange ;
+mais un modèle qui n'appelle d'outils sur Chat Completions qu'une fois sa
+réflexion désactivée — c'est le cas de `gpt-6-luna` — échoue dès la première
+demande.
+
+Le champ *Modèle* laissé vide suit le défaut du plugin, y compris quand une
+mise à jour le change. Jeedom n'enregistre pas une valeur égale au défaut : si
+vous aviez écrit `gpt-4o-mini` quand c'était lui, c'est désormais
+`gpt-5.4-mini` qui répond. Réécrivez `gpt-4o-mini` dans le champ pour le
+garder ; tout autre modèle écrit dans le champ reste celui que vous avez
+choisi.
 
 ### 3. Vérifier le mode de sécurité
 

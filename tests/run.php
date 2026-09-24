@@ -242,7 +242,7 @@ function reponseOutils($_appels, $_jetons = array(200, 20), $_finish = 'tool_cal
     }
     return array(
         'id'      => 'chatcmpl-rejeu',
-        'model'   => 'gpt-4o-mini',
+        'model'   => 'gpt-5.4-mini-2026-03-17',
         'choices' => array(array(
             'index'         => 0,
             'message'       => array('role' => 'assistant', 'content' => null, 'tool_calls' => $tool_calls),
@@ -261,7 +261,7 @@ function reponseOutils($_appels, $_jetons = array(200, 20), $_finish = 'tool_cal
 function reponseTexte($_texte, $_jetons = array(120, 30), $_finish = 'stop') {
     return array(
         'id'      => 'chatcmpl-rejeu',
-        'model'   => 'gpt-4o-mini',
+        'model'   => 'gpt-5.4-mini-2026-03-17',
         'choices' => array(array(
             'index'         => 0,
             'message'       => array('role' => 'assistant', 'content' => $_texte),
@@ -369,7 +369,7 @@ const CLE_API = 'sk-proj-rejeuK2000beSecret0123456789';
 
 config::vider();
 reglage('apikey', CLE_API);
-reglage('model', 'gpt-4o-mini');
+reglage('model', k2000beOpenAI::MODELE_DEFAUT);
 reglage('securite', 'actions');
 reglage('lecture_defaut', 1);
 reglage('max_tool_calls', 10);
@@ -1637,10 +1637,27 @@ check('un champ vidé retombe sur le .ini, comme dans le cœur',
     (int) config::byKey('max_tokens', 'k2000be', 4242), 1200);
 reglage('max_tokens', 1200);
 
+/*
+ * Le défaut vit en deux endroits : le .ini, que le cœur rend quand le champ est
+ * vide, et la constante, que le plugin passe en repli à config::byKey(). S'ils
+ * divergeaient, le modèle employé dépendrait du chemin qui l'a lu.
+ */
+reglage('model', '');
+check('le .ini et la constante livrent le même modèle',
+    (string) config::byKey('model', 'k2000be', 'aucun'), k2000beOpenAI::MODELE_DEFAUT);
+rejeu::scenario(array(reponseTexte('OK')));
+k2000beOpenAI::chat(array(array('role' => 'user', 'content' => 'Salut')));
+check('un champ Modèle vide envoie le défaut', rejeu::charge(0)['model'], k2000beOpenAI::MODELE_DEFAUT);
+reglage('model', 'gpt-4o-mini');
+rejeu::scenario(array(reponseTexte('OK')));
+k2000beOpenAI::chat(array(array('role' => 'user', 'content' => 'Salut')));
+check('un modèle choisi reste le sien', rejeu::charge(0)['model'], 'gpt-4o-mini');
+reglage('model', k2000beOpenAI::MODELE_DEFAUT);
+
 rejeu::scenario(array(reponseTexte('OK')));
 $essai = k2000beOpenAI::essai();
 check('l\'essai de clé réussit', $essai['ok'], true);
-check('il nomme le modèle qui a répondu', $essai['modele'], 'gpt-4o-mini');
+check('il nomme le modèle qui a répondu', $essai['modele'], 'gpt-5.4-mini-2026-03-17');
 check('et ne dépense presque rien', rejeu::charge(0)['max_tokens'], 64);
 rejeu::scenario(array(fixture('erreur-quota')));
 $essai = k2000beOpenAI::essai();
@@ -2543,7 +2560,7 @@ for ($jour = 0; $jour < 11; $jour++) {
         $lignesJour[] = array(
             'date' => time() - $jour * 86400, 'eq' => 2000, 'assistant' => 'Autre',
             'utilisateur' => 'jerome', 'demande' => 'demande ' . $ligne, 'reponse' => 'réponse',
-            'statut' => 'SUCCESS', 'modele' => 'gpt-4o-mini',
+            'statut' => 'SUCCESS', 'modele' => 'gpt-5.4-mini',
             'jetons' => array('invite' => 1, 'reponse' => 1, 'total' => 2),
             'duree' => 0.1, 'etapes' => array(),
         );
@@ -3188,7 +3205,7 @@ function ligneJournal($_eqId, $_statut, $_jetons, $_date) {
     return array(
         'date' => $_date, 'eq' => $_eqId, 'assistant' => 'KITT',
         'utilisateur' => 'jerome', 'demande' => 'demande', 'reponse' => 'réponse',
-        'statut' => $_statut, 'modele' => 'gpt-4o-mini',
+        'statut' => $_statut, 'modele' => 'gpt-5.4-mini',
         'jetons' => array('invite' => $_jetons, 'reponse' => 0, 'total' => $_jetons),
         'duree' => 1.0, 'etapes' => array(),
     );

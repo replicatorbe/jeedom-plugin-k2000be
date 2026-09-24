@@ -38,7 +38,15 @@ class k2000beOpenAI {
     const PLUGIN = 'k2000be';
 
     const BASE_URL_DEFAUT = 'https://api.openai.com/v1';
-    const MODELE_DEFAUT = 'gpt-4o-mini';
+    /*
+     * Le modèle livré. Il doit tenir les appels d'outils parallèles sur Chat
+     * Completions tels que chat() les envoie, sans réglage de plus : c'est ce
+     * qui écarte les modèles plus récents qui ne font d'outils ici qu'avec
+     * reasoning_effort à « none ». Le détail du choix est dans le .ini, qui
+     * doit rester d'accord avec cette constante — le rejeu hors ligne le
+     * vérifie.
+     */
+    const MODELE_DEFAUT = 'gpt-5.4-mini';
     const MAX_TOKENS_DEFAUT = 1200;
     const TEMPERATURE_DEFAUT = 0.3;
     const TIMEOUT_DEFAUT = 60;

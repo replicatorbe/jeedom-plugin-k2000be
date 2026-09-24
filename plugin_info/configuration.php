@@ -28,12 +28,12 @@ if (!isConnect('admin')) {
 		<div class="form-group">
 			<label class="col-md-4 control-label">{{Modèle}}</label>
 			<div class="col-md-3">
-				<input class="configKey form-control" data-l1key="model" placeholder="gpt-4o-mini">
+				<input class="configKey form-control" data-l1key="model" placeholder="gpt-5.4-mini">
 			</div>
 			<div class="col-md-5">
 				<a class="btn btn-default btn-sm" id="bt_k2000beModeles"><i class="fas fa-list"></i> {{Enregistrer et voir les modèles}}</a>
 				<span id="span_k2000beModeles" style="margin-left:8px;"></span>
-				<span class="help-block" style="margin:6px 0 0 0;">{{Un petit modèle répond vite et coûte peu, mais se trompe davantage sur une maison compliquée : il oublie une pièce, ou confond deux lampes. Un grand modèle raisonne mieux et coûte dix fois plus. Commencez petit, et changez si l'assistant vous déçoit. Le bouton enregistre la configuration, puis demande à OpenAI la liste des modèles auxquels votre clé donne droit.}}</span>
+				<span class="help-block" style="margin:6px 0 0 0;">{{Un petit modèle répond vite et coûte peu, mais se trompe davantage sur une maison compliquée : il oublie une pièce, ou confond deux lampes. Un grand modèle raisonne mieux et coûte dix fois plus. Commencez petit, et changez si l'assistant vous déçoit. Laissé vide, le champ vaut gpt-5.4-mini, choisi parce qu'il appelle les outils sans réglage de plus. Un modèle qui n'accepte pas max_tokens ou la température est rattrapé tout seul, au prix d'un aller-retour refusé ; les modèles de raisonnement, eux, ne font d'outils sur ce plugin que s'ils le font sans réfléchir d'abord — gpt-6-luna, par exemple, n'en fait pas ici. Le bouton enregistre la configuration, puis demande à OpenAI la liste des modèles auxquels votre clé donne droit.}}</span>
 				<div id="div_k2000beModeles" style="margin-top:6px;"></div>
 			</div>
 		</div>
