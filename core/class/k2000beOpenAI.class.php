@@ -38,7 +38,13 @@ class k2000beOpenAI {
     const PLUGIN = 'k2000be';
 
     const BASE_URL_DEFAUT = 'https://api.openai.com/v1';
-    const MODELE_DEFAUT = 'gpt-4o-mini';
+    /*
+     * Le modèle livré. Le détail du choix est dans le .ini, qui doit rester
+     * d'accord avec cette constante — le rejeu hors ligne le vérifie. Il
+     * n'appelle d'outils sur Chat Completions qu'avec reasoning_effort à
+     * « none » : c'est profil() qui le lui envoie.
+     */
+    const MODELE_DEFAUT = 'gpt-6-luna';
     const MAX_TOKENS_DEFAUT = 1200;
     const TEMPERATURE_DEFAUT = 0.3;
     const TIMEOUT_DEFAUT = 60;
@@ -71,16 +77,20 @@ class k2000beOpenAI {
     const ATTENTE_RELANCE = 1;
 
     /*
-     * Deux corrections de charge au plus : max_tokens, puis temperature. Le
-     * détail est dans corriger() ; le chiffre est ici parce qu'il borne la
-     * boucle et donc le nombre d'appels facturés.
+     * Trois corrections de charge au plus, une par sorte : le nom du plafond de
+     * jetons, reasoning_effort, la température. Le détail est dans corriger(),
+     * qui ne corrige jamais deux fois la même sorte ; le chiffre est ici parce
+     * qu'il borne la boucle et donc le nombre d'allers-retours.
      */
-    const CORRECTIONS_MAX = 2;
+    const CORRECTIONS_MAX = 3;
 
     /*
-     * Les modèles de raisonnement dépensent des jetons avant de répondre : un
-     * plafond trop bas rendrait une réponse vide et ferait croire la clé
-     * mauvaise alors qu'elle est bonne.
+     * Un modèle qui raisonne dépense des jetons avant de répondre : un plafond
+     * trop bas rendrait une réponse vide et ferait croire la clé mauvaise alors
+     * qu'elle est bonne. Soixante-quatre suffisent parce que profil() coupe le
+     * raisonnement des modèles qui l'acceptent, gpt-6-luna compris ; pour ceux
+     * qui raisonnent quand même (série o, gpt-5 d'origine), c'est une marge,
+     * pas une garantie.
      */
     const ESSAI_MAX_TOKENS = 64;
 
@@ -148,15 +158,31 @@ class k2000beOpenAI {
          * le nombre d'outils sont ramenés dans leurs bornes en le disant. La
          * page de configuration doit l'écrire à côté du champ : « laisser à 0
          * pour ne pas plafonner la réponse ».
+         *
+         * Sans réflexion cachée, les 1200 jetons livrés vont tous à la réponse,
+         * comme avec gpt-4o-mini. Un signalement sur le forum d'OpenAI disait
+         * gpt-5.4 raisonner malgré « none » quand max_completion_tokens était
+         * présent ; le support l'a donné pour corrigé (reasoning_tokens à 0),
+         * et rien de tel n'est documenté pour gpt-6-luna. Le plafond reste
+         * donc envoyé : l'omettre laisserait un modèle qui s'égare écrire
+         * jusqu'à 128 000 jetons. Si le défaut revenait, la réponse s'arrêterait
+         * sur « length », que la boucle traite déjà en le disant.
          */
+        $profil = self::profil($modele);
         $maxTokens = (int) (isset($_options['max_tokens']) ? $_options['max_tokens'] : config::byKey('max_tokens', self::PLUGIN, self::MAX_TOKENS_DEFAUT));
         if ($maxTokens > 0) {
-            $charge['max_tokens'] = $maxTokens;
+            $charge[$profil['plafond']] = $maxTokens;
         }
-        $charge['temperature'] = (float) (isset($_options['temperature']) ? $_options['temperature'] : config::byKey('temperature', self::PLUGIN, self::TEMPERATURE_DEFAUT));
+        if ($profil['reflexion'] !== null) {
+            $charge['reasoning_effort'] = $profil['reflexion'];
+        }
+        if ($profil['temperature']) {
+            $charge['temperature'] = (float) (isset($_options['temperature']) ? $_options['temperature'] : config::byKey('temperature', self::PLUGIN, self::TEMPERATURE_DEFAUT));
+        }
 
         $corps = null;
         $derniere = null;
+        $faites = array();
         for ($essai = 0; $essai <= self::CORRECTIONS_MAX; $essai++) {
             try {
                 $corps = self::appel('/chat/completions', $charge);
@@ -166,7 +192,7 @@ class k2000beOpenAI {
                 /* Un refus que l'on sait corriger ne remonte pas : le plugin se
                  * corrige tout seul, sans réglage de l'utilisateur. Les autres
                  * partent tels quels. */
-                if (self::$code !== 400 || !self::corriger($charge)) {
+                if (self::$code !== 400 || !self::corriger($charge, $faites)) {
                     throw $e;
                 }
                 $derniere = $e;
@@ -175,12 +201,13 @@ class k2000beOpenAI {
         }
 
         /*
-         * La boucle pouvait sortir sans break ni throw — trois corrections
-         * acceptées d'affilée — et laissait alors l'utilisateur devant
-         * « réponse sans message exploitable » au lieu du vrai refus de l'API.
-         * C'est une sortie que le code actuel n'atteint pas (corriger() ne sait
-         * réparer que deux choses, pour deux corrections autorisées), mais une
-         * sortie muette n'a pas à attendre d'être atteinte pour être fermée.
+         * La boucle pouvait sortir sans break ni throw — une correction de plus
+         * que CORRECTIONS_MAX acceptée d'affilée — et laissait alors
+         * l'utilisateur devant « réponse sans message exploitable » au lieu du
+         * vrai refus de l'API. C'est une sortie que le code actuel n'atteint pas
+         * (corriger() ne corrige chaque sorte qu'une fois, et il y a autant de
+         * sortes que de corrections autorisées), mais une sortie muette n'a pas
+         * à attendre d'être atteinte pour être fermée.
          */
         if ($derniere !== null) {
             throw $derniere;
@@ -222,33 +249,112 @@ class k2000beOpenAI {
     }
 
     /*
-     * Rattrape les deux refus que les modèles récents opposent à une charge
-     * pourtant valide pour les précédents. Rend vrai si la charge a changé et
-     * mérite un nouvel essai.
+     * Ce que la charge doit contenir pour ce modèle, deviné d'après son nom :
+     *  - « plafond » : le nom du plafond de jetons. Les modèles qui raisonnent
+     *    (gpt-5 et suivants, série o) refusent max_tokens et exigent
+     *    max_completion_tokens. Les autres gardent max_tokens, qu'OpenAI
+     *    accepte encore et que les passerelles compatibles connaissent souvent
+     *    seul : un nom inconnu tombe de ce côté-là ;
+     *  - « reflexion » : le reasoning_effort à envoyer, ou null. « none » pour
+     *    les modèles qui l'acceptent — gpt-5.1 et suivants, gpt-6 — parce que
+     *    gpt-6-luna et gpt-5.6 raisonnent sinon au niveau « medium », et que
+     *    sur Chat Completions ils n'appellent alors plus aucun outil. Les
+     *    variantes codex, pro, chat-latest et gpt-6-astra refusent « none »,
+     *    gpt-5 d'origine et ses mini et nano aussi (ils n'ont que « minimal ») :
+     *    rien ne leur est envoyé ;
+     *  - « temperature » : si on l'envoie. Un modèle qui raisonne la refuse
+     *    (« only the default (1) is supported ») ; il l'accepte dès que
+     *    reasoning_effort vaut « none ».
      *
-     * Le nom du modèle ne permet pas de deviner lequel des deux s'applique — la
-     * liste change tous les mois, et un nom personnalisé ne dit rien. On envoie
-     * donc la charge classique, et on corrige sur refus.
+     * Le nom ne dit pas tout — la liste change tous les mois, et une passerelle
+     * nomme ses modèles comme elle veut. Cette première charge évite un
+     * aller-retour refusé à chaque échange ; corriger() reste le filet quand
+     * elle se trompe.
      */
-    private static function corriger(&$_charge) {
+    private static function profil($_modele) {
+        $nom = strtolower(trim((string) $_modele));
+        /* « openai/gpt-6-luna » derrière une passerelle. */
+        $barre = strrpos($nom, '/');
+        if ($barre !== false) {
+            $nom = substr($nom, $barre + 1);
+        }
+
+        $recent = preg_match('/^gpt-(5\.\d|[6-9]|\d{2})/', $nom) === 1;
+        $raisonne = $recent
+            || preg_match('/^gpt-5($|-)/', $nom) === 1
+            || preg_match('/^o\d/', $nom) === 1;
+        if (!$raisonne) {
+            return array('plafond' => 'max_tokens', 'reflexion' => null, 'temperature' => true);
+        }
+
+        $none = $recent;
+        foreach (array('codex', '-pro', 'chat-latest', 'astra') as $motif) {
+            if (strpos($nom, $motif) !== false) {
+                $none = false;
+            }
+        }
+        return array(
+            'plafond'     => 'max_completion_tokens',
+            'reflexion'   => $none ? 'none' : null,
+            'temperature' => $none,
+        );
+    }
+
+    /*
+     * Rattrape les refus qu'un modèle oppose à une charge que profil() a mal
+     * devinée. Rend vrai si la charge a changé et mérite un nouvel essai.
+     *
+     * $_faites retient les sortes déjà corrigées : chacune ne l'est qu'une
+     * fois, faute de quoi max_tokens et max_completion_tokens pourraient
+     * s'échanger jusqu'à épuiser les essais.
+     */
+    private static function corriger(&$_charge, &$_faites) {
         $detail = strtolower(self::$detail);
         if ($detail === '') {
             return false;
         }
 
         /* « Unsupported parameter: 'max_tokens' is not supported with this
-         * model. Use 'max_completion_tokens' instead. » */
-        if (isset($_charge['max_tokens']) && strpos($detail, 'max_tokens') !== false) {
+         * model. Use 'max_completion_tokens' instead. » Ce message cite aussi
+         * max_completion_tokens : le sens inverse, plus bas, ne s'essaie donc
+         * que sur une charge qui ne porte pas max_tokens. */
+        if (!isset($_faites['plafond']) && isset($_charge['max_tokens']) && strpos($detail, 'max_tokens') !== false) {
             $_charge['max_completion_tokens'] = $_charge['max_tokens'];
             unset($_charge['max_tokens']);
+            $_faites['plafond'] = true;
+            return true;
+        }
+
+        /* Le sens inverse : une passerelle ou un modèle ancien qui ne connaît
+         * pas max_completion_tokens. */
+        if (!isset($_faites['plafond']) && isset($_charge['max_completion_tokens']) && strpos($detail, 'max_completion_tokens') !== false) {
+            $_charge['max_tokens'] = $_charge['max_completion_tokens'];
+            unset($_charge['max_completion_tokens']);
+            $_faites['plafond'] = true;
+            return true;
+        }
+
+        /* « Unsupported value: 'reasoning_effort' does not support 'none' with
+         * this model. », ou « Unsupported parameter: 'reasoning_effort' » chez
+         * un modèle qui ne raisonne pas. Le modèle reprend alors son niveau
+         * par défaut, et refusera sans doute la température à l'essai suivant :
+         * c'est la correction d'après. Un refus de la température peut citer
+         * reasoning_effort (« not supported when reasoning_effort is medium ») :
+         * il ne doit pas passer par ici. */
+        if (!isset($_faites['reflexion']) && isset($_charge['reasoning_effort'])
+            && (strpos($detail, 'reasoning_effort') !== false || strpos($detail, 'reasoning.effort') !== false)
+            && strpos($detail, 'temperature') === false) {
+            unset($_charge['reasoning_effort']);
+            $_faites['reflexion'] = true;
             return true;
         }
 
         /* « Unsupported value: 'temperature' does not support 0.3 with this
          * model. Only the default (1) is supported. » La retirer vaut mieux que
          * la forcer à 1 : on obtient la même chose sans prétendre choisir. */
-        if (isset($_charge['temperature']) && strpos($detail, 'temperature') !== false) {
+        if (!isset($_faites['temperature']) && isset($_charge['temperature']) && strpos($detail, 'temperature') !== false) {
             unset($_charge['temperature']);
+            $_faites['temperature'] = true;
             return true;
         }
 
