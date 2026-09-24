@@ -242,7 +242,7 @@ function reponseOutils($_appels, $_jetons = array(200, 20), $_finish = 'tool_cal
     }
     return array(
         'id'      => 'chatcmpl-rejeu',
-        'model'   => 'gpt-5.4-mini-2026-03-17',
+        'model'   => 'gpt-6-luna',
         'choices' => array(array(
             'index'         => 0,
             'message'       => array('role' => 'assistant', 'content' => null, 'tool_calls' => $tool_calls),
@@ -261,7 +261,7 @@ function reponseOutils($_appels, $_jetons = array(200, 20), $_finish = 'tool_cal
 function reponseTexte($_texte, $_jetons = array(120, 30), $_finish = 'stop') {
     return array(
         'id'      => 'chatcmpl-rejeu',
-        'model'   => 'gpt-5.4-mini-2026-03-17',
+        'model'   => 'gpt-6-luna',
         'choices' => array(array(
             'index'         => 0,
             'message'       => array('role' => 'assistant', 'content' => $_texte),
@@ -1560,6 +1560,50 @@ check('la frise, elle, garde la trace des deux pannes', count($conversation['tou
 /* ======================================================= CLIENT OPENAI */
 section('Le client OpenAI');
 
+/*
+ * La charge dépend du modèle. gpt-6-luna, livré par défaut, raisonne sinon au
+ * niveau « medium » et n'appelle alors plus d'outils sur Chat Completions ;
+ * gpt-4o-mini, lui, doit recevoir exactement ce qu'il recevait avant.
+ */
+$outilEssai = array(array('type' => 'function', 'function' => array('name' => 'essai', 'parameters' => array('type' => 'object'))));
+rejeu::scenario(array(reponseTexte('OK')));
+k2000beOpenAI::chat(array(array('role' => 'user', 'content' => 'Salut')), $outilEssai);
+$charge = rejeu::charge(0);
+check('gpt-6-luna reçoit reasoning_effort à none', isset($charge['reasoning_effort']) ? $charge['reasoning_effort'] : null, 'none');
+check('et son plafond sous le nom qu\'il exige', isset($charge['max_completion_tokens']) ? $charge['max_completion_tokens'] : null, 1200);
+check('sans max_tokens', isset($charge['max_tokens']), false);
+check('avec la température, qu\'il accepte sans raisonnement', isset($charge['temperature']) ? $charge['temperature'] : null, 0.3);
+check('et avec ses outils', count($charge['tools']), 1);
+check('du premier coup', count(rejeu::$charges), 1);
+
+reglage('model', 'gpt-4o-mini');
+rejeu::scenario(array(reponseTexte('OK')));
+k2000beOpenAI::chat(array(array('role' => 'user', 'content' => 'Salut')), $outilEssai);
+$charge = rejeu::charge(0);
+check('gpt-4o-mini garde max_tokens', isset($charge['max_tokens']) ? $charge['max_tokens'] : null, 1200);
+check('sans max_completion_tokens', isset($charge['max_completion_tokens']), false);
+check('avec la température', isset($charge['temperature']) ? $charge['temperature'] : null, 0.3);
+check('et sans reasoning_effort, qu\'il ne connaît pas', isset($charge['reasoning_effort']), false);
+
+/* Ce que profil() devine pour les familles qu'il sépare. */
+$profils = array();
+foreach (array('gpt-4.1-mini', 'gpt-5-mini', 'o4-mini', 'gpt-5.4-mini', 'gpt-5.6-luna', 'gpt-6-astra', 'gpt-5.1-codex-mini', 'openai/gpt-6-luna', 'llama3') as $nom) {
+    $p = invoquerClasse('k2000beOpenAI', 'profil', array($nom));
+    $profils[$nom] = $p['plafond'] . '|' . ($p['reflexion'] === null ? '-' : $p['reflexion']) . '|' . ($p['temperature'] ? 't' : '-');
+}
+check('chaque famille reçoit sa charge', $profils, array(
+    'gpt-4.1-mini'       => 'max_tokens|-|t',
+    'gpt-5-mini'         => 'max_completion_tokens|-|-',
+    'o4-mini'            => 'max_completion_tokens|-|-',
+    'gpt-5.4-mini'       => 'max_completion_tokens|none|t',
+    'gpt-5.6-luna'       => 'max_completion_tokens|none|t',
+    'gpt-6-astra'        => 'max_completion_tokens|-|-',
+    'gpt-5.1-codex-mini' => 'max_completion_tokens|-|-',
+    'openai/gpt-6-luna'  => 'max_completion_tokens|none|t',
+    'llama3'             => 'max_tokens|-|t',
+));
+
+/* Les rattrapages, quand le nom a trompé profil(). */
 rejeu::scenario(array(fixture('erreur-max-tokens'), reponseTexte('OK')));
 $retour = k2000beOpenAI::chat(array(array('role' => 'user', 'content' => 'Salut')));
 check('le refus de max_tokens est rattrapé tout seul', count(rejeu::$charges), 2);
@@ -1572,6 +1616,33 @@ rejeu::scenario(array(fixture('erreur-temperature'), reponseTexte('OK')));
 k2000beOpenAI::chat(array(array('role' => 'user', 'content' => 'Salut')));
 check('la température refusée est retirée', isset(rejeu::charge(1)['temperature']), false);
 check('elle avait bien été envoyée', isset(rejeu::charge(0)['temperature']), true);
+reglage('model', k2000beOpenAI::MODELE_DEFAUT);
+
+rejeu::scenario(array(fixture('erreur-max-completion-tokens'), reponseTexte('OK')));
+k2000beOpenAI::chat(array(array('role' => 'user', 'content' => 'Salut')));
+check('max_completion_tokens refusé redevient max_tokens', isset(rejeu::charge(1)['max_tokens']) ? rejeu::charge(1)['max_tokens'] : null, 1200);
+check('sans rien garder de l\'autre nom', isset(rejeu::charge(1)['max_completion_tokens']), false);
+
+/*
+ * gpt-6-astra refuse « none » : la charge perd reasoning_effort, puis la
+ * température que le modèle, raisonnant de nouveau, refuse à son tour. Deux
+ * corrections, trois essais, et la réponse arrive.
+ */
+reglage('model', 'gpt-7-nova');
+rejeu::scenario(array(fixture('erreur-reasoning-effort'), fixture('erreur-temperature'), reponseTexte('OK')));
+$retour = k2000beOpenAI::chat(array(array('role' => 'user', 'content' => 'Salut')));
+check('reasoning_effort refusé est retiré', isset(rejeu::charge(1)['reasoning_effort']), false);
+check('la température l\'est ensuite', isset(rejeu::charge(2)['temperature']), false);
+check('et la réponse arrive au troisième essai', $retour['message']['content'], 'OK');
+
+/* Chaque sorte n'est corrigée qu'une fois : un second refus du plafond part
+ * tel quel, au lieu d'échanger les deux noms jusqu'à épuiser les essais. */
+$message = '';
+rejeu::scenario(array(fixture('erreur-max-completion-tokens'), fixture('erreur-max-tokens'), reponseTexte('OK')));
+try { k2000beOpenAI::chat(array(array('role' => 'user', 'content' => 'Salut'))); } catch (Throwable $e) { $message = $e->getMessage(); }
+check('un plafond refusé sous les deux noms remonte', count(rejeu::$charges), 2);
+check('avec un message', $message !== '', true);
+reglage('model', k2000beOpenAI::MODELE_DEFAUT);
 
 $message = '';
 rejeu::scenario(array(fixture('erreur-cle-refusee')));
@@ -1657,8 +1728,9 @@ reglage('model', k2000beOpenAI::MODELE_DEFAUT);
 rejeu::scenario(array(reponseTexte('OK')));
 $essai = k2000beOpenAI::essai();
 check('l\'essai de clé réussit', $essai['ok'], true);
-check('il nomme le modèle qui a répondu', $essai['modele'], 'gpt-5.4-mini-2026-03-17');
-check('et ne dépense presque rien', rejeu::charge(0)['max_tokens'], 64);
+check('il nomme le modèle qui a répondu', $essai['modele'], 'gpt-6-luna');
+check('et ne dépense presque rien', rejeu::charge(0)['max_completion_tokens'], 64);
+check('sans raisonner, pour que 64 jetons suffisent', rejeu::charge(0)['reasoning_effort'], 'none');
 rejeu::scenario(array(fixture('erreur-quota')));
 $essai = k2000beOpenAI::essai();
 check('un essai raté est un résultat, pas une panne', $essai['ok'], false);
@@ -2560,7 +2632,7 @@ for ($jour = 0; $jour < 11; $jour++) {
         $lignesJour[] = array(
             'date' => time() - $jour * 86400, 'eq' => 2000, 'assistant' => 'Autre',
             'utilisateur' => 'jerome', 'demande' => 'demande ' . $ligne, 'reponse' => 'réponse',
-            'statut' => 'SUCCESS', 'modele' => 'gpt-5.4-mini',
+            'statut' => 'SUCCESS', 'modele' => 'gpt-6-luna',
             'jetons' => array('invite' => 1, 'reponse' => 1, 'total' => 2),
             'duree' => 0.1, 'etapes' => array(),
         );
@@ -3205,7 +3277,7 @@ function ligneJournal($_eqId, $_statut, $_jetons, $_date) {
     return array(
         'date' => $_date, 'eq' => $_eqId, 'assistant' => 'KITT',
         'utilisateur' => 'jerome', 'demande' => 'demande', 'reponse' => 'réponse',
-        'statut' => $_statut, 'modele' => 'gpt-5.4-mini',
+        'statut' => $_statut, 'modele' => 'gpt-6-luna',
         'jetons' => array('invite' => $_jetons, 'reponse' => 0, 'total' => $_jetons),
         'duree' => 1.0, 'etapes' => array(),
     );

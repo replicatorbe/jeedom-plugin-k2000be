@@ -50,22 +50,25 @@ enregistre la configuration, interroge OpenAI avec la clé qui vient d'être
 enregistrée, et affiche le verdict à côté de lui. Tant qu'il ne répond pas
 favorablement, inutile d'aller plus loin.
 
-Le modèle par défaut est `gpt-5.4-mini` : c'est le plus récent des petits
-modèles qui tiennent le mécanisme d'outils tel que le plugin l'emploie, sans
-réglage de plus. Il coûte plus cher que `gpt-4o-mini`, livré jusqu'ici, mais se
-trompe moins souvent d'équipement. Le bouton **Enregistrer et voir les
-modèles**, sous le champ *Modèle*, liste ceux auxquels votre clé donne droit.
+Le modèle par défaut est `gpt-6-luna` : le petit modèle actuel d'OpenAI, et
+moins cher que `gpt-4o-mini`, livré jusqu'ici. Le bouton **Enregistrer et voir
+les modèles**, sous le champ *Modèle*, liste ceux auxquels votre clé donne
+droit.
 
-Tous ne conviennent pas. Un modèle qui refuse `max_tokens` ou la température
-est rattrapé tout seul, au prix d'un premier appel refusé à chaque échange ;
-mais un modèle qui n'appelle d'outils sur Chat Completions qu'une fois sa
-réflexion désactivée — c'est le cas de `gpt-6-luna` — échoue dès la première
-demande.
+Les modèles récents raisonnent avant de répondre, et sur l'API qu'emploie le
+plugin, `gpt-6-luna` n'appelle alors plus d'outils. Le plugin lui demande donc
+de ne pas raisonner (`reasoning_effort` à `none`) : il répond vite, garde la
+température réglée plus bas, et la longueur maximale d'une réponse va toute à
+la réponse. Le plugin reconnaît de même les modèles qui exigent
+`max_completion_tokens` au lieu de `max_tokens`, et se rattrape tout seul si un
+modèle refuse quand même un paramètre, au prix d'un premier appel refusé. Un
+modèle qui ne sait pas se passer de raisonnement — `gpt-6-astra`, les variantes
+*codex* et *pro* — ne convient pas : il échoue dès la première demande.
 
 Le champ *Modèle* laissé vide suit le défaut du plugin, y compris quand une
 mise à jour le change. Jeedom n'enregistre pas une valeur égale au défaut : si
 vous aviez écrit `gpt-4o-mini` quand c'était lui, c'est désormais
-`gpt-5.4-mini` qui répond. Réécrivez `gpt-4o-mini` dans le champ pour le
+`gpt-6-luna` qui répond. Réécrivez `gpt-4o-mini` dans le champ pour le
 garder ; tout autre modèle écrit dans le champ reste celui que vous avez
 choisi.
 

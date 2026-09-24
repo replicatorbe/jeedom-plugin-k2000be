@@ -1,0 +1,9 @@
+{
+    "error": {
+        "status": 400,
+        "message": "Unrecognized request argument supplied: max_completion_tokens",
+        "type": "invalid_request_error",
+        "param": null,
+        "code": null
+    }
+}
