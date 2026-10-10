@@ -460,7 +460,10 @@ check('la réponse ne l\'est pas', (int) $kitt->getCmd('info', 'reply')->getIsHi
 /* Idempotence : le cœur rappelle postSave() à chaque enregistrement. */
 $kitt->createCommands();
 check('un second enregistrement n\'en crée pas d\'autres', count($kitt->getCmdList()), 11);
-check('la version du plugin est lisible', k2000be::pluginVersion(), '0.1');
+/* Comparée à info.json et non à un numéro écrit ici : sinon chaque nouvelle
+ * version fait échouer ce contrôle, qui ne vérifie pourtant que la lecture. */
+$infoJson = json_decode(file_get_contents(__DIR__ . '/../plugin_info/info.json'), true);
+check('la version du plugin est lisible', k2000be::pluginVersion(), (string) $infoJson['pluginVersion']);
 check('les dossiers de travail existent', is_dir(k2000beJournal::racine() . '/conversations'), true);
 
 /* ============================================================ SÉCURITÉ */
