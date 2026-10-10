@@ -794,12 +794,20 @@ class k2000beJournal {
             if (!is_array($etape)) {
                 continue;
             }
-            $etapes[] = array(
+            $ligne = array(
                 'outil'  => self::texte(isset($etape['outil']) ? $etape['outil'] : '', 60),
                 'titre'  => self::texte(isset($etape['titre']) ? $etape['titre'] : '', 200),
                 'statut' => self::texte(isset($etape['statut']) ? $etape['statut'] : '', 20),
                 'detail' => self::texte(isset($etape['detail']) ? $etape['detail'] : '', 500),
             );
+            /* Le pourquoi d'une action, quand le modèle l'a donné : c'est ce
+             * qu'on vient chercher ici un mois plus tard, devant un volet
+             * fermé que personne n'a demandé. Absent des lectures, il n'y
+             * coûte rien. */
+            if (isset($etape['raison']) && trim((string) $etape['raison']) !== '') {
+                $ligne['raison'] = self::texte($etape['raison'], 200);
+            }
+            $etapes[] = $ligne;
         }
         return $etapes;
     }

@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.3 — 10/10/2026
+
+- **Routines.** Une programmation cron et une consigne, une ligne par routine :
+  l'assistant se réveille à l'heure dite, comme si on le lui demandait. Dix au
+  plus ; une ligne illisible empêche l'enregistrement au lieu de se taire.
+- **Déclencheurs.** Un état, une comparaison, une consigne : l'assistant se
+  réveille quand la condition devient vraie — une fois, pas tant qu'elle le
+  reste —, ou à chaque changement avec `change`. Le premier passage apprend
+  l'état sans rien déclencher, et le repos de l'assistant vaut par ligne.
+- **Notification native.** La réponse d'un tour né sans humain part vers la
+  commande de type message choisie — téléphone, annonce, TV. « RAS » ne part
+  pas, une erreur non plus. Nouvelle commande d'information *Origine de la
+  demande*.
+- **Quand il agit seul.** Un tour sans humain obéit à un réglage par
+  assistant : proposer (défaut — toute action autorisée devient une
+  confirmation), agir sur ce qui est autorisé sauf ce qui ouvre, déverrouille
+  ou désarme, ou ne rien actionner. Le réglage ne fait que restreindre.
+- **La raison de chaque action.** `execute_command` prend `reason`, obligatoire
+  quand personne n'a rien demandé. Elle est gardée au journal, montrée dans la
+  frise, et portée jusqu'à la confirmation.
+- **Deux outils.** `get_statistics` résume un état historisé sur trente jours
+  au plus — minimum et maximum exacts, moyenne, tendance, moyennes par jour,
+  part du temps à 1 pour un binaire. `get_weather` lit en un appel les
+  équipements météo, reconnus à leur type générique `WEATHER_*`.
+- `get_states` n'attend plus que lorsqu'une commande est partie dans la même
+  demande. Le modèle passait `wait` à toutes ses lectures : une question sur la
+  température durait de douze à quinze secondes.
+- L'alerte automatique ne se réveille plus une seconde fois à la fin d'une
+  détection dont elle a vu le début. Une détection brève, vue par sa seule fin,
+  réveille toujours.
+- Un mode de sécurité vide retombe sur la lecture seule, et non plus sur les
+  actions réelles. Le défaut du `.ini` masquait le défaut du code : un plugin
+  déployé sans ce fichier ouvrait la maison en grand.
+- La page Santé compte les routines et les déclencheurs, et signale un
+  assistant qui veille sans notification.
+
 ## 0.2 — 24/09/2026
 
 - L'alerte automatique ne se joue plus dans le cron minute. Le cœur de Jeedom

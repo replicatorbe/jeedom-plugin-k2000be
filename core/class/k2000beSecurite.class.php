@@ -155,16 +155,23 @@ class k2000beSecurite {
      * Le mode global. Un mode illisible — configuration corrompue, valeur
      * écrite à la main — rend le plus prudent des trois plutôt que le plus
      * permissif : c'est le refus par défaut appliqué au réglage lui-même.
+     *
+     * Le vide compris. Il rendait « actions », c'est-à-dire exactement
+     * l'inverse de ce que promet la phrase ci-dessus : le cœur ne retombe sur
+     * le défaut du .ini que s'il trouve ce fichier, et un plugin déployé à la
+     * main sans lui — ou une valeur effacée en base — ouvrait la maison en
+     * grand sans que rien ne le dise. Le défaut passé à config::byKey() suit
+     * la même règle, pour la même raison.
      */
     public static function mode() {
         $mode = '';
         try {
-            $mode = trim((string) config::byKey('securite', 'k2000be', self::MODE_ACTIONS));
+            $mode = trim((string) config::byKey('securite', 'k2000be', self::MODE_LECTURE));
         } catch (Throwable $e) {
             return self::MODE_LECTURE;
         }
         if ($mode === '') {
-            return self::MODE_ACTIONS;
+            return self::MODE_LECTURE;
         }
         if (!in_array($mode, array(self::MODE_LECTURE, self::MODE_SIMULATION, self::MODE_ACTIONS), true)) {
             return self::MODE_LECTURE;
@@ -374,7 +381,7 @@ class k2000beSecurite {
      * Ne lève jamais : une demande impossible est un refus motivé, pas une
      * panne. Le modèle doit pouvoir l'expliquer, et la conversation continuer.
      */
-    public static function controler($_cmdId, $_valeur = null) {
+    public static function controler($_cmdId, $_valeur = null, $_autonomie = null) {
         $id = (int) $_cmdId;
 
         /* 1 — la commande existe */
@@ -478,6 +485,19 @@ class k2000beSecurite {
             return self::verdict(self::POLITIQUE_REFUS, $motif, $cmd, $eqLogic, $titre);
         }
 
+        /* 6 bis — personne n'a parlé */
+        $abaissee = false;
+        if ($_autonomie !== null) {
+            $avant = $politique;
+            $politique = self::politiqueSansHumain($politique, $cmd, $_autonomie);
+            if ($politique === self::POLITIQUE_REFUS) {
+                return self::verdict(self::POLITIQUE_REFUS,
+                    sprintf(__('« %s » ne peut pas partir d\'un tour que personne n\'a demandé : cet assistant est réglé pour ne rien actionner quand il agit seul.', __FILE__), $titre),
+                    $cmd, $eqLogic, $titre);
+            }
+            $abaissee = ($avant === self::POLITIQUE_AUTORISE && $politique === self::POLITIQUE_CONFIRMATION);
+        }
+
         /* 7 — la valeur */
         $valeur = null;
         try {
@@ -500,6 +520,12 @@ class k2000beSecurite {
             $motif = ($mode === self::MODE_SIMULATION)
                 ? sprintf(__('« %s » demande une confirmation humaine, mais l\'assistant est en mode simulation : même confirmée, elle ne partira pas vers la domotique.', __FILE__), $titre)
                 : sprintf(__('« %s » demande une confirmation humaine avant de partir.', __FILE__), $titre);
+            if ($abaissee) {
+                /* La commande est autorisée, et pourtant on demande : le dire,
+                 * sans quoi celui qui reçoit la question croit à un réglage
+                 * qu'il n'a jamais posé. */
+                $motif .= ' ' . __('Elle est autorisée, mais l\'assistant agit seul : il propose, et c\'est à vous de trancher.', __FILE__);
+            }
             return self::verdict(self::POLITIQUE_CONFIRMATION, $motif, $cmd, $eqLogic, $titre, $valeur);
         }
 
@@ -513,6 +539,55 @@ class k2000beSecurite {
         return self::verdict(self::POLITIQUE_AUTORISE,
             sprintf(__('« %s » est autorisée pour l\'assistant.', __FILE__), $titre),
             $cmd, $eqLogic, $titre, $valeur);
+    }
+
+    /* ======================================== QUAND PERSONNE N'A PARLÉ */
+
+    /*
+     * Les trois réglages d'un assistant qui agit seul — réveillé par une
+     * routine, un déclencheur ou une alerte, et non par quelqu'un qui attend
+     * sa réponse.
+     *
+     *  - « proposer », le défaut : rien ne part sans un humain. Une commande
+     *    autorisée devient une commande à confirmer ; l'assistant propose,
+     *    la notification porte la question, et quelqu'un tranche ;
+     *  - « autorisees » : les commandes autorisées partent, SAUF celles qui
+     *    engagent la sécurité du logement (TYPES_SENSIBLES), ramenées à la
+     *    confirmation. C'est le seul endroit où sensible() décide de quelque
+     *    chose, et c'est voulu : la nuit, sans personne devant l'écran, une
+     *    commande autorisée à la main un après-midi d'essai ne doit pas
+     *    pouvoir ouvrir le portail ;
+     *  - « lecture » : rien du tout. L'assistant observe et raconte.
+     *
+     * Ce réglage ne fait que RESTREINDRE. Il ne rend jamais autorisée une
+     * commande qui ne l'est pas, et une commande déjà « à confirmer » le
+     * reste : un tour sans humain ne peut pas faire plus qu'un tour avec.
+     * Toute valeur inconnue vaut « proposer ».
+     */
+    const AUTONOMIE_PROPOSER = 'proposer';
+    const AUTONOMIE_AUTORISEES = 'autorisees';
+    const AUTONOMIE_LECTURE = 'lecture';
+
+    public static function autonomie($_valeur) {
+        $valeur = trim((string) $_valeur);
+        if (in_array($valeur, array(self::AUTONOMIE_AUTORISEES, self::AUTONOMIE_LECTURE), true)) {
+            return $valeur;
+        }
+        return self::AUTONOMIE_PROPOSER;
+    }
+
+    private static function politiqueSansHumain($_politique, $_cmd, $_autonomie) {
+        $autonomie = self::autonomie($_autonomie);
+        if ($autonomie === self::AUTONOMIE_LECTURE) {
+            return self::POLITIQUE_REFUS;
+        }
+        if ($_politique !== self::POLITIQUE_AUTORISE) {
+            return $_politique;
+        }
+        if ($autonomie === self::AUTONOMIE_AUTORISEES && !self::sensible($_cmd)) {
+            return self::POLITIQUE_AUTORISE;
+        }
+        return self::POLITIQUE_CONFIRMATION;
     }
 
     /*

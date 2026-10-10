@@ -365,6 +365,40 @@ class k2000be extends eqLogic {
     const ALERTE_PAS = 2;
     const ALERTE_PEREMPTION = 600;
 
+    /* ======================================================= AUTONOMIE */
+
+    /*
+     * Les trois façons dont un assistant parle sans qu'on lui parle, et le
+     * nom sous lequel le journal les range. Ce nom est aussi ce qui décide de
+     * tout le reste : un tour né de l'une d'elles n'a personne devant l'écran,
+     * il obéit donc au réglage « Quand il agit seul », exige une raison à
+     * chaque action, et sa réponse part en notification.
+     */
+    const ORIGINE_ALERTE = 'alerte';
+    const ORIGINE_ROUTINE = 'routine';
+    const ORIGINE_DECLENCHEUR = 'declencheur';
+    const ORIGINES_AUTONOMES = array('alerte', 'routine', 'declencheur');
+
+    /*
+     * Dix routines et dix déclencheurs par assistant. Chacun est une demande
+     * facturée chaque fois qu'il part ; au-delà, ce n'est plus un assistant
+     * qui veille, c'est une facture qui tourne.
+     */
+    const ROUTINES_MAX = 10;
+    const DECLENCHEURS_MAX = 10;
+
+    /*
+     * La réponse qui dit « rien à signaler ». Une routine du soir qui vérifie
+     * que tout est fermé n'a rien à dire neuf soirs sur dix, et une
+     * notification quotidienne « tout va bien » apprend surtout à ne plus lire
+     * les notifications. Le modèle est prié de répondre ce mot-là, et rien
+     * d'autre, quand rien ne mérite d'être lu : la notification ne part pas.
+     */
+    const RIEN_A_SIGNALER = 'RAS';
+
+    /* Une notification tient sur un écran de téléphone. */
+    const NOTIFICATION_MAX = 1000;
+
     /* ========================================================= AFFICHAGE */
 
     /* Le cœur ne fournit pas de date en français, et setlocale() dépend des
@@ -496,9 +530,22 @@ class k2000be extends eqLogic {
      * surveillance.
      */
     public static function cron() {
+        $maintenant = time();
         foreach (eqLogic::byType(__CLASS__, true) as $eqLogic) {
+            /* Trois veilles indépendantes : une routine mal écrite ne doit pas
+             * faire taire l'alerte d'intrusion du même assistant. */
             try {
                 $eqLogic->surveiller();
+            } catch (Throwable $e) {
+                self::tracer('error', $eqLogic->getHumanName() . ' : ' . $e->getMessage());
+            }
+            try {
+                $eqLogic->routines($maintenant);
+            } catch (Throwable $e) {
+                self::tracer('error', $eqLogic->getHumanName() . ' : ' . $e->getMessage());
+            }
+            try {
+                $eqLogic->declencheurs($maintenant);
             } catch (Throwable $e) {
                 self::tracer('error', $eqLogic->getHumanName() . ' : ' . $e->getMessage());
             }
@@ -534,27 +581,20 @@ class k2000be extends eqLogic {
         k2000beOutils::oublier();
 
         $dernier = 0;
-        $recent = null;
-        $combien = 0;
         foreach ($balayage['decisifs'] as $ligne) {
             if ($ligne['ts'] > $dernier) {
                 $dernier = $ligne['ts'];
-                $recent = $ligne;
             }
         }
         if ($dernier === 0) {
             /* Rien n'a jamais basculé : il n'y a même pas de repère à poser. */
             return false;
         }
-        foreach ($balayage['decisifs'] as $ligne) {
-            if ($ligne['ts'] > (int) $this->getConfiguration('alerte_vu', 0)) {
-                $combien++;
-            }
-        }
 
         $vu = (int) $this->getConfiguration('alerte_vu', 0);
         if ($vu === 0) {
             $this->setConfiguration('alerte_vu', $dernier);
+            $this->setConfiguration('alerte_ouverts', array());
             $this->save();
             return false;
         }
@@ -562,7 +602,57 @@ class k2000be extends eqLogic {
             return false;
         }
 
+        /*
+         * Ce qui est neuf, et ce qui ne l'est qu'en apparence.
+         *
+         * Une détection qui commence puis finit fait DEUX basculements, et la
+         * fin réveillait l'assistant une seconde fois pour raconter la même
+         * chose — seul le repos le cachait, et un repos d'une minute le
+         * montrait. On ne peut pas pour autant ignorer toute fin : une règle
+         * qui monte et retombe entre deux passages n'est vue QUE par sa fin,
+         * et c'est souvent la plus courte qui compte.
+         *
+         * D'où la liste des débuts déjà vus : une fin dont on a vu le début
+         * ne fait que fermer la ligne ; une fin sans début connu est une
+         * détection brève, et elle alerte. Les débuts vus pendant le repos ou
+         * maison désarmée y entrent aussi : leur fin ne doit pas ressortir
+         * plus tard comme une nouveauté.
+         */
+        $ouverts = array();
+        foreach ((array) $this->getConfiguration('alerte_ouverts', array()) as $id) {
+            $ouverts[(int) $id] = true;
+        }
+        $nouveaux = array();
+        foreach ($balayage['decisifs'] as $ligne) {
+            if ($ligne['ts'] <= $vu) {
+                continue;
+            }
+            $id = (int) $ligne['command_id'];
+            if ($ligne['what'] === 'started') {
+                $ouverts[$id] = true;
+                $nouveaux[] = $ligne;
+            } elseif ($ligne['what'] === 'ended' && isset($ouverts[$id])) {
+                unset($ouverts[$id]);
+            } else {
+                unset($ouverts[$id]);
+                $nouveaux[] = $ligne;
+            }
+        }
+
         $this->setConfiguration('alerte_vu', $dernier);
+        $this->setConfiguration('alerte_ouverts', array_keys($ouverts));
+
+        if (count($nouveaux) === 0) {
+            $this->save();
+            return false;
+        }
+        $recent = $nouveaux[0];
+        foreach ($nouveaux as $ligne) {
+            if ($ligne['ts'] > $recent['ts']) {
+                $recent = $ligne;
+            }
+        }
+        $combien = count($nouveaux);
 
         /*
          * Le garde-fou d'armement, et il se ferme par défaut.
@@ -651,7 +741,7 @@ class k2000be extends eqLogic {
      * dont la table des tâches est en panne, coûte moins cher ; le cœur ne
      * crie qu'au-delà de trois chevauchements.
      */
-    private function planifierAlerte($_message) {
+    private function planifierAlerte($_message, $_origine = self::ORIGINE_ALERTE) {
         $tache = null;
         try {
             $tache = new cron();
@@ -665,6 +755,10 @@ class k2000be extends eqLogic {
                 'eqLogic_id' => (int) $this->getId(),
                 'message'    => $_message,
                 'planifiee'  => time(),
+                /* Routine, déclencheur ou alerte : le même lanceur sert aux
+                 * trois, et c'est ce mot qui dira au journal — et à la boucle —
+                 * qui a parlé. */
+                'origine'    => $_origine,
             ));
             $tache->setOnce(1);
             $tache->setSchedule(cron::convertDateToCron(time()));
@@ -697,7 +791,7 @@ class k2000be extends eqLogic {
         }
         /* « alerte » et non « scenario » : le journal doit distinguer une
          * demande née d'un déclenchement d'une demande écrite par quelqu'un. */
-        $this->ask($_message, array('utilisateur' => 'alerte'));
+        $this->ask($_message, array('utilisateur' => $_origine));
         return false;
     }
 
@@ -718,6 +812,14 @@ class k2000be extends eqLogic {
             $id = (is_array($_options) && isset($_options['eqLogic_id'])) ? (int) $_options['eqLogic_id'] : 0;
             $message = (is_array($_options) && isset($_options['message'])) ? trim((string) $_options['message']) : '';
             $planifiee = (is_array($_options) && isset($_options['planifiee'])) ? (int) $_options['planifiee'] : 0;
+            /* Une tâche planifiée par une version antérieure n'a pas
+             * d'origine : c'était une alerte, la seule chose qui en
+             * planifiait. Une origine inconnue en devient une aussi — jamais
+             * un humain, que rien ici ne peut prouver. */
+            $origine = (is_array($_options) && isset($_options['origine'])) ? (string) $_options['origine'] : '';
+            if (!in_array($origine, self::ORIGINES_AUTONOMES, true)) {
+                $origine = self::ORIGINE_ALERTE;
+            }
             if ($id <= 0 || $message === '') {
                 self::tracer('error', __('Alerte différée sans assistant ni message : rien n\'a été joué.', __FILE__));
                 return null;
@@ -759,7 +861,7 @@ class k2000be extends eqLogic {
             /* « alerte » et non « scenario » : le journal doit distinguer une
              * demande née d'un déclenchement d'une demande écrite par
              * quelqu'un. */
-            return $eqLogic->ask($message, array('utilisateur' => 'alerte'));
+            return $eqLogic->ask($message, array('utilisateur' => $origine));
         } catch (Throwable $e) {
             self::tracer('error', __('Alerte différée interrompue :', __FILE__) . ' ' . $e->getMessage());
             return null;
@@ -793,6 +895,328 @@ class k2000be extends eqLogic {
         }
         $texte = strtolower(trim((string) $valeur));
         return in_array($texte, array('1', 'true', 'on', 'armed'), true);
+    }
+
+    /* ========================================================== ROUTINES */
+
+    /*
+     * Les routines : une heure, une consigne. « 30 6 * * 1-5 | Fais le point
+     * du matin » réveille l'assistant à 6 h 30 les jours de semaine, comme si
+     * quelqu'un le lui avait demandé — sauf que personne n'est là, ce que le
+     * tour sait, et ce qui change ce qu'il a le droit de faire.
+     *
+     * Une ligne par routine, dans la configuration de l'assistant : c'est ce
+     * qui se relit d'un coup d'œil, se copie d'une box à l'autre et se
+     * commente en le désactivant d'un « # » en tête de ligne. Un tableau de
+     * champs aurait été plus joli, et dix fois plus long à parcourir.
+     *
+     * La minute est marquée dans le cache de l'équipement AVANT de lancer la
+     * tâche : le cœur peut jouer cron() deux fois dans la même minute — un
+     * redémarrage, un rattrapage — et la routine ne doit partir qu'une fois.
+     * Une minute manquée, elle, n'est pas rattrapée : la routine de 6 h 30
+     * jouée à 9 h ferait un briefing du matin sur une maison déjà vide.
+     */
+    public function routines($_maintenant = null) {
+        $maintenant = ($_maintenant === null) ? time() : (int) $_maintenant;
+        $analyse = self::analyserRoutines((string) $this->getConfiguration('routines', ''));
+        if (count($analyse['valides']) === 0) {
+            return 0;
+        }
+        $minute = date('Y-m-d H:i', $maintenant);
+        $lancees = 0;
+        foreach ($analyse['valides'] as $routine) {
+            if (!self::cronCorrespond($routine['quand'], $maintenant)) {
+                continue;
+            }
+            $cle = 'routine_' . md5($routine['ligne']);
+            if ((string) $this->getCache($cle, '') === $minute) {
+                continue;
+            }
+            $this->setCache($cle, $minute);
+            $this->planifierAlerte($routine['consigne'], self::ORIGINE_ROUTINE);
+            $lancees++;
+        }
+        return $lancees;
+    }
+
+    /*
+     * Les routines écrites, séparées en celles qu'on sait jouer et celles
+     * qu'on ne sait pas lire. Publique : l'enregistrement de l'assistant s'en
+     * sert pour refuser une ligne fautive au moment où on l'écrit, plutôt que
+     * de la laisser se taire pour toujours.
+     */
+    public static function analyserRoutines($_texte) {
+        $valides = array();
+        $erreurs = array();
+        foreach (self::lignesUtiles($_texte) as $ligne) {
+            $morceaux = explode('|', $ligne, 2);
+            $quand = trim(preg_replace('/\s+/', ' ', $morceaux[0]));
+            $consigne = isset($morceaux[1]) ? self::aplatir($morceaux[1]) : '';
+            if ($consigne === '') {
+                $erreurs[] = sprintf(__('« %s » : la consigne manque après la barre « | ».', __FILE__), $ligne);
+                continue;
+            }
+            if (self::cronCorrespond($quand, time()) === null) {
+                $erreurs[] = sprintf(__('« %s » : « %s » n\'est pas une programmation à cinq champs (minute heure jour mois jour-de-semaine).', __FILE__), $ligne, $quand);
+                continue;
+            }
+            if (count($valides) >= self::ROUTINES_MAX) {
+                $erreurs[] = sprintf(__('Plus de %s routines : les suivantes sont ignorées.', __FILE__), self::ROUTINES_MAX);
+                break;
+            }
+            $valides[] = array('ligne' => $ligne, 'quand' => $quand,
+                'consigne' => self::raccourcir($consigne, self::CONSIGNES_MAX));
+        }
+        return array('valides' => $valides, 'erreurs' => $erreurs);
+    }
+
+    /*
+     * Une programmation cron à cinq champs correspond-elle à cet instant ?
+     * Rend true, false, ou null quand l'expression ne se lit pas.
+     *
+     * Écrite ici plutôt qu'empruntée au cœur, qui embarque une bibliothèque
+     * pour cela : elle tient en trente lignes, elle se rejoue hors ligne, et
+     * elle ne change pas de comportement le jour où le cœur change de
+     * version. Les formes reconnues sont celles qu'on écrit vraiment :
+     * « * », « 5 », « 1-5 », « 1,3,5 », « *\/15 », « 8-18/2 ». Le dimanche
+     * vaut 0 ou 7.
+     *
+     * Comme cron, quand le jour du mois ET le jour de la semaine sont
+     * restreints, l'un OU l'autre suffit : « 0 8 1 * 1 » part le premier du
+     * mois et tous les lundis.
+     */
+    public static function cronCorrespond($_expression, $_instant) {
+        $champs = preg_split('/\s+/', trim((string) $_expression));
+        if (!is_array($champs) || count($champs) !== 5) {
+            return null;
+        }
+        $bornes = array(array(0, 59), array(0, 23), array(1, 31), array(1, 12), array(0, 7));
+        $valeurs = array(
+            (int) date('i', $_instant), (int) date('G', $_instant), (int) date('j', $_instant),
+            (int) date('n', $_instant), (int) date('w', $_instant),
+        );
+        $resultats = array();
+        foreach ($champs as $rang => $champ) {
+            $valeur = $valeurs[$rang];
+            $ok = self::champCorrespond($champ, $valeur, $bornes[$rang][0], $bornes[$rang][1]);
+            if ($ok === null) {
+                return null;
+            }
+            if ($rang === 4 && !$ok && $valeur === 0) {
+                /* Le dimanche s'écrit aussi 7. */
+                $ok = self::champCorrespond($champ, 7, 0, 7);
+            }
+            $resultats[] = $ok;
+        }
+        if (!$resultats[0] || !$resultats[1] || !$resultats[3]) {
+            return false;
+        }
+        $jourLibre = ($champs[2] === '*');
+        $semaineLibre = ($champs[4] === '*');
+        if (!$jourLibre && !$semaineLibre) {
+            return $resultats[2] || $resultats[4];
+        }
+        return $resultats[2] && $resultats[4];
+    }
+
+    /* Un champ cron et une valeur : true, false, ou null s'il ne se lit pas. */
+    private static function champCorrespond($_champ, $_valeur, $_min, $_max) {
+        $trouve = false;
+        foreach (explode(',', $_champ) as $element) {
+            if (!preg_match('#^(\*|(\d+)(?:-(\d+))?)(?:/(\d+))?$#', $element, $m)) {
+                return null;
+            }
+            if ($m[1] === '*') {
+                $debut = $_min;
+                $fin = $_max;
+            } else {
+                $debut = (int) $m[2];
+                $fin = (isset($m[3]) && $m[3] !== '') ? (int) $m[3] : $debut;
+                if (isset($m[4]) && $m[4] !== '' && (!isset($m[3]) || $m[3] === '')) {
+                    /* « 5/15 » : de 5 jusqu'au bout, de quinze en quinze. */
+                    $fin = $_max;
+                }
+            }
+            $pas = (isset($m[4]) && $m[4] !== '') ? (int) $m[4] : 1;
+            if ($debut < $_min || $fin > $_max || $debut > $fin || $pas < 1) {
+                return null;
+            }
+            if ($_valeur >= $debut && $_valeur <= $fin && (($_valeur - $debut) % $pas) === 0) {
+                $trouve = true;
+            }
+        }
+        return $trouve;
+    }
+
+    /* ====================================================== DÉCLENCHEURS */
+
+    /*
+     * Les déclencheurs : un état, une condition, une consigne. « #4512# > 66 |
+     * L'humidité du bureau dépasse 66 % : que faut-il faire ? » réveille
+     * l'assistant quand l'humidité FRANCHIT 66 %, pas à chaque minute où elle
+     * s'y trouve.
+     *
+     * Le front, et lui seul. Une condition vraie pendant trois heures n'est
+     * qu'un événement : le moment où elle l'est devenue. La réveiller chaque
+     * minute ferait cent quatre-vingts demandes facturées pour raconter la
+     * même chose. « change » se déclenche à chaque changement de valeur, pour
+     * les états qui n'ont pas de seuil — un mode d'alarme, un code de météo.
+     *
+     * Le premier passage ne déclenche rien : il apprend l'état de départ. Sans
+     * cela, enregistrer l'assistant un soir de canicule ferait partir tous les
+     * déclencheurs de température d'un coup.
+     *
+     * Le repos de l'assistant vaut aussi ici, ligne par ligne : une humidité
+     * qui oscille autour du seuil franchirait la barre toutes les cinq
+     * minutes. Un franchissement pendant le repos est oublié, pas reporté.
+     *
+     * La condition est lue par le plugin, pas par le modèle, et pas sous son
+     * droit de lecture : c'est la configuration de l'administrateur, comme
+     * l'état d'armement. Le modèle n'apprend le nom et la valeur de l'état que
+     * s'il a le droit de les lire.
+     */
+    public function declencheurs($_maintenant = null) {
+        $maintenant = ($_maintenant === null) ? time() : (int) $_maintenant;
+        $analyse = self::analyserDeclencheurs((string) $this->getConfiguration('declencheurs', ''));
+        if (count($analyse['valides']) === 0) {
+            return 0;
+        }
+        $repos = (int) $this->getConfiguration('alerte_repos', self::REPOS_DEFAUT);
+        if ($repos < self::REPOS_MIN) {
+            $repos = self::REPOS_DEFAUT;
+        }
+        if ($repos > self::REPOS_MAX) {
+            $repos = self::REPOS_MAX;
+        }
+
+        $lances = 0;
+        foreach ($analyse['valides'] as $declencheur) {
+            $cmd = cmd::byId($declencheur['cmd']);
+            if (!is_object($cmd) || $cmd->getType() !== 'info') {
+                continue;
+            }
+            $valeur = $cmd->execCmd();
+            if ($valeur === null) {
+                continue;
+            }
+            $valeur = is_bool($valeur) ? ($valeur ? '1' : '0') : trim((string) $valeur);
+
+            $cle = 'declencheur_' . md5($declencheur['ligne']);
+            $precedent = $this->getCache($cle, null);
+            if ($declencheur['operateur'] === 'change') {
+                $etat = $valeur;
+                $franchi = ($precedent !== null && (string) $precedent !== $valeur);
+            } else {
+                $etat = self::conditionVraie($valeur, $declencheur['operateur'], $declencheur['seuil']) ? '1' : '0';
+                $franchi = ($precedent !== null && (string) $precedent === '0' && $etat === '1');
+            }
+            $this->setCache($cle, $etat);
+            if (!$franchi) {
+                continue;
+            }
+
+            $cleRepos = $cle . '_t';
+            $derniere = (int) $this->getCache($cleRepos, 0);
+            if ($derniere > 0 && ($maintenant - $derniere) < $repos * 60) {
+                continue;
+            }
+            $this->setCache($cleRepos, $maintenant);
+
+            $message = $declencheur['consigne'];
+            if (k2000beSecurite::lisible($cmd)) {
+                $condition = ($declencheur['operateur'] === 'change')
+                    ? __('a changé', __FILE__)
+                    : $declencheur['operateur'] . ' ' . $declencheur['seuil'];
+                $unite = trim((string) $cmd->getUnite());
+                $message .= ' ' . sprintf(__('(Déclencheur : « %s » vaut %s, condition « %s ».)', __FILE__),
+                    k2000beSecurite::titre($cmd), $valeur . (($unite !== '') ? ' ' . $unite : ''), $condition);
+            }
+            $this->planifierAlerte($message, self::ORIGINE_DECLENCHEUR);
+            $lances++;
+        }
+        return $lances;
+    }
+
+    /* Les déclencheurs écrits, séparés comme les routines. */
+    public static function analyserDeclencheurs($_texte) {
+        $valides = array();
+        $erreurs = array();
+        foreach (self::lignesUtiles($_texte) as $ligne) {
+            $morceaux = explode('|', $ligne, 2);
+            $condition = trim($morceaux[0]);
+            $consigne = isset($morceaux[1]) ? self::aplatir($morceaux[1]) : '';
+            if ($consigne === '') {
+                $erreurs[] = sprintf(__('« %s » : la consigne manque après la barre « | ».', __FILE__), $ligne);
+                continue;
+            }
+            /* « #123# > 26 », « 123 >= 26,5 », « #123# == on », « 123 change ». */
+            if (!preg_match('/^#?(\d+)#?\s*(change|>=|<=|!=|==|=|>|<)\s*(.*)$/u', $condition, $m)) {
+                $erreurs[] = sprintf(__('« %s » : la condition s\'écrit « #identifiant# opérateur valeur », par exemple « #123# > 26 », ou « #123# change ».', __FILE__), $ligne);
+                continue;
+            }
+            $seuil = trim($m[3]);
+            if ($m[2] !== 'change' && $seuil === '') {
+                $erreurs[] = sprintf(__('« %s » : la valeur à comparer manque.', __FILE__), $ligne);
+                continue;
+            }
+            if (count($valides) >= self::DECLENCHEURS_MAX) {
+                $erreurs[] = sprintf(__('Plus de %s déclencheurs : les suivants sont ignorés.', __FILE__), self::DECLENCHEURS_MAX);
+                break;
+            }
+            $valides[] = array(
+                'ligne'     => $ligne,
+                'cmd'       => (int) $m[1],
+                'operateur' => ($m[2] === '=') ? '==' : $m[2],
+                'seuil'     => $seuil,
+                'consigne'  => self::raccourcir($consigne, self::CONSIGNES_MAX),
+            );
+        }
+        return array('valides' => $valides, 'erreurs' => $erreurs);
+    }
+
+    /*
+     * La comparaison d'un déclencheur. En nombres quand les deux côtés en
+     * sont — la virgule décimale comprise, on écrit « 26,5 » en français —,
+     * en texte sinon, sans casse : « on » vaut « ON ». Un « > » entre deux
+     * textes est faux plutôt que de comparer des lettres.
+     */
+    public static function conditionVraie($_valeur, $_operateur, $_seuil) {
+        $valeur = str_replace(',', '.', trim((string) $_valeur));
+        $seuil = str_replace(',', '.', trim((string) $_seuil));
+        if (is_numeric($valeur) && is_numeric($seuil)) {
+            $a = (float) $valeur;
+            $b = (float) $seuil;
+        } else {
+            $a = mb_strtolower(trim((string) $_valeur));
+            $b = mb_strtolower(trim((string) $_seuil));
+            if (!in_array($_operateur, array('==', '!='), true)) {
+                return false;
+            }
+        }
+        switch ($_operateur) {
+            case '>':  return $a > $b;
+            case '<':  return $a < $b;
+            case '>=': return $a >= $b;
+            case '<=': return $a <= $b;
+            case '!=': return $a != $b;
+            case '==': return $a == $b;
+        }
+        return false;
+    }
+
+    /* Les lignes qui comptent : ni vides, ni commentées d'un « # » suivi
+     * d'un espace — « #123# » est une commande, « # 123 » une ligne mise de
+     * côté. */
+    private static function lignesUtiles($_texte) {
+        $lignes = array();
+        foreach (preg_split('/\r\n|\r|\n/', (string) $_texte) as $ligne) {
+            $ligne = trim($ligne);
+            if ($ligne === '' || preg_match('/^#(\s|$)/', $ligne) || strpos($ligne, '//') === 0) {
+                continue;
+            }
+            $lignes[] = $ligne;
+        }
+        return $lignes;
     }
 
     public static function cron5() {
@@ -940,6 +1364,36 @@ class k2000be extends eqLogic {
                 : __('Aucun plafond n\'est réglé : un scénario qui s\'emballe peut facturer sans limite côté box. Le réglage « Demandes par jour » de la configuration du plugin l\'arrête avant tout appel réseau.', __FILE__),
         );
 
+        /*
+         * Ce qui parle tout seul. Rien de tout cela n'est une panne, mais
+         * c'est ce qu'on vient chercher ici quand une notification arrive à
+         * trois heures du matin : qui l'a envoyée, et pourquoi. Une veille
+         * sans sortie est signalée — elle coûte des jetons pour une réponse
+         * que personne ne lira.
+         */
+        $routines = 0;
+        $declencheurs = 0;
+        $muets = array();
+        foreach (eqLogic::byType(__CLASS__, true) as $eqLogic) {
+            $r = count(self::analyserRoutines((string) $eqLogic->getConfiguration('routines', ''))['valides']);
+            $d = count(self::analyserDeclencheurs((string) $eqLogic->getConfiguration('declencheurs', ''))['valides']);
+            $routines += $r;
+            $declencheurs += $d;
+            $veille = ($r + $d > 0) || (int) $eqLogic->getConfiguration('alerte_auto', 0) === 1;
+            $sortie = trim((string) $eqLogic->getConfiguration('notifier_cmd', '')) !== ''
+                && (string) $eqLogic->getConfiguration('notifier_quand', 'autonome') !== 'jamais';
+            if ($veille && !$sortie) {
+                $muets[] = $eqLogic->getName();
+            }
+        }
+        $lignes[] = array(
+            'test'   => __('Autonomie', __FILE__),
+            'result' => sprintf(__('%s routine(s), %s déclencheur(s)', __FILE__), $routines, $declencheurs),
+            'state'  => true,
+            'advice' => (count($muets) === 0) ? ''
+                : sprintf(__('%s veille sans notification : ses réponses ne sont lues par personne, sauf par un scénario. Le champ « Notifier par » de l\'assistant les envoie où vous voulez.', __FILE__), implode(', ', $muets)),
+        );
+
         return $lignes;
     }
 
@@ -957,6 +1411,22 @@ class k2000be extends eqLogic {
             /* La tuile de discussion porte une zone de saisie : plus étroite,
              * elle deviendrait inutilisable sur un tableau de bord. */
             $this->setDisplay('width', '480px');
+            return;
+        }
+
+        /*
+         * Une routine ou un déclencheur mal écrits sont refusés à
+         * l'enregistrement, et seulement là. Ignorés en silence, ils ne
+         * partiraient jamais, et personne ne le saurait avant le matin où le
+         * briefing manque. Seul un équipement déjà créé est contrôlé : le
+         * bouton « Ajouter » ne porte aucune routine, et l'exception le
+         * rendrait inopérant — voir la remarque au-dessus.
+         */
+        $erreurs = array_merge(
+            self::analyserRoutines((string) $this->getConfiguration('routines', ''))['erreurs'],
+            self::analyserDeclencheurs((string) $this->getConfiguration('declencheurs', ''))['erreurs']);
+        if (count($erreurs) > 0) {
+            throw new Exception(implode(' ', $erreurs));
         }
     }
 
@@ -1086,6 +1556,14 @@ class k2000be extends eqLogic {
          * tableau de bord s'en sert. */
         $this->addCmdIfMissing('question', 'Objet de la confirmation', 'info', 'string', array(
             'order' => $order++, 'icon' => 'fas fa-question-circle',
+        ));
+
+        /* Qui a parlé au dernier tour : un login, « scenario », ou l'une des
+         * trois origines autonomes. Un scénario qui veut traiter autrement
+         * une réponse de routine et une réponse à une question humaine lit
+         * ceci, plutôt que de deviner au texte. */
+        $this->addCmdIfMissing('origine', 'Origine de la demande', 'info', 'string', array(
+            'order' => $order++, 'icon' => 'fas fa-route',
         ));
 
         $this->addCmdIfMissing('confirm', 'Confirmer', 'action', 'other', array(
@@ -1337,8 +1815,19 @@ class k2000be extends eqLogic {
 
         /* Le budget d'attente de get_states est celui d'un tour : un scénario
          * qui enchaîne deux demandes dans le même processus PHP ne doit pas
-         * voir la seconde privée d'attente parce que la première l'a dépensé. */
-        k2000beOutils::nouvelleDemande();
+         * voir la seconde privée d'attente parce que la première l'a dépensé.
+         *
+         * Deux choses de plus se décident ici, une fois pour tout le tour :
+         * une commande est-elle déjà partie — c'est le cas d'un tour qui
+         * reprend après une confirmation, et la vérification doit alors
+         * pouvoir attendre —, et quelqu'un attend-il la réponse. Personne,
+         * quand c'est une routine, un déclencheur ou une alerte : le tour obéit
+         * alors au réglage « Quand il agit seul » de l'assistant. */
+        $origine = isset($_contexte['origine']) ? (string) $_contexte['origine'] : '';
+        $autonome = in_array($origine, self::ORIGINES_AUTONOMES, true);
+        k2000beOutils::nouvelleDemande(
+            self::compterActions($_etapes) > 0,
+            $autonome ? (string) $this->getConfiguration('autonome_actions', k2000beSecurite::AUTONOMIE_PROPOSER) : null);
 
         /* La mémoire d'avant la demande, pour le cas où le tour ne produirait
          * rien du tout : voir plus bas, à « memoire ». */
@@ -1376,7 +1865,7 @@ class k2000be extends eqLogic {
              * normaliserAppels() a déjà remis d'aplomb. D'une demande à l'autre,
              * seule la fin de l'invite change — voir systemPrompt().
              */
-            $systeme = array('role' => 'system', 'content' => $this->systemPrompt());
+            $systeme = array('role' => 'system', 'content' => $this->systemPrompt(null, $autonome ? $origine : null));
 
             /* Le catalogue d'outils ne change pas d'un tour à l'autre : le
              * relire à chaque aller-retour relirait la base pour rien. */
@@ -1861,6 +2350,10 @@ class k2000be extends eqLogic {
                 'titre'      => isset($_demande['titre']) ? (string) $_demande['titre'] : '',
                 'valeur'     => isset($_demande['valeur']) ? $_demande['valeur'] : null,
                 'motif'      => isset($_demande['motif']) ? (string) $_demande['motif'] : '',
+                /* Le pourquoi d'une proposition née sans humain : il doit
+                 * survivre jusqu'à l'exécution, pour être au journal à côté
+                 * de la commande qui part sur le « oui » de quelqu'un. */
+                'raison'     => isset($_demande['raison']) ? (string) $_demande['raison'] : '',
             )),
         );
     }
@@ -1951,9 +2444,10 @@ class k2000be extends eqLogic {
             $messages[] = array('role' => 'user', 'content' => $texte);
 
             $resultat = $this->jouer($messages, array(), array(
-                'debut' => $debut,
-                'avant' => $avant,
-                'jalon' => $this->jalon($conversation),
+                'debut'   => $debut,
+                'avant'   => $avant,
+                'jalon'   => $this->jalon($conversation),
+                'origine' => $utilisateur,
             ));
             return $this->enregistrer($conversation, $texte, $resultat, $utilisateur, $debut);
         } finally {
@@ -2244,6 +2738,9 @@ class k2000be extends eqLogic {
         $this->publier('lastrun', date('d/m/Y H:i:s'));
         $this->publier('pending', ($_resultat['attente'] === null) ? 0 : 1);
         $this->publier('question', self::resumeAttente($_resultat['attente']));
+        $this->publier('origine', $_utilisateur);
+
+        $this->notifier($_utilisateur, $_resultat['statut'], $texte, $_resultat['attente']);
 
         return array(
             'reponse' => $_resultat['reponse'],
@@ -2255,6 +2752,90 @@ class k2000be extends eqLogic {
             'duree'   => $duree,
             'erreur'  => $_resultat['erreur'],
         );
+    }
+
+    /*
+     * La sortie : la réponse du tour, poussée vers la commande de
+     * notification choisie pour cet assistant — un téléphone, une annonce,
+     * un écran.
+     *
+     * Avant elle, une alerte automatique publiait sa réponse dans « Réponse »
+     * et attendait qu'un scénario vienne la chercher : l'assistant savait
+     * veiller, mais pas prévenir. Une routine ou un déclencheur sans sortie
+     * ne servent à rien ; c'est pourquoi le réglage par défaut ne notifie que
+     * ce qui est né sans humain — celui qui tape une question sur la page a
+     * déjà sa réponse sous les yeux.
+     *
+     * Trois choses ne partent pas : un tour en erreur — le journal le dit, et
+     * une panne réseau la nuit ne mérite pas de réveiller —, un tour
+     * autonome qui n'a rien à signaler (RIEN_A_SIGNALER), et tout ce qui
+     * viserait une commande qui n'est pas un message ou appartient à un
+     * assistant : un assistant qui se notifie lui-même se reparlerait sans
+     * fin.
+     *
+     * La commande de notification n'est PAS soumise aux autorisations de
+     * l'onglet du même nom : ce n'est pas le modèle qui la choisit ni qui en
+     * écrit la destination, c'est l'administrateur, ici. Le modèle n'en
+     * décide que le texte.
+     */
+    private function notifier($_origine, $_statut, $_texte, $_attente) {
+        $quand = (string) $this->getConfiguration('notifier_quand', 'autonome');
+        if ($quand === 'jamais') {
+            return false;
+        }
+        $autonome = in_array((string) $_origine, self::ORIGINES_AUTONOMES, true);
+        if ($quand !== 'toujours' && !$autonome) {
+            return false;
+        }
+        if ($_statut === self::STATUT_ERROR) {
+            return false;
+        }
+        $texte = trim((string) $_texte);
+        if ($texte === '' || ($autonome && $_statut !== self::STATUT_CONFIRMATION
+                && preg_match('/^' . self::RIEN_A_SIGNALER . '\W*$/iu', $texte))) {
+            return false;
+        }
+
+        $id = (int) trim(str_replace('#', '', (string) $this->getConfiguration('notifier_cmd', '')));
+        if ($id <= 0) {
+            return false;
+        }
+        try {
+            $cmd = cmd::byId($id);
+            if (!is_object($cmd) || $cmd->getType() !== 'action' || (string) $cmd->getSubType() !== 'message') {
+                self::tracer('info', sprintf(__('%s : la commande de notification %s n\'est pas une action de type message, rien n\'a été envoyé.', __FILE__),
+                    $this->getHumanName(), $id));
+                return false;
+            }
+            $eqLogic = $cmd->getEqLogic();
+            if (!is_object($eqLogic) || (int) $eqLogic->getIsEnable() !== 1 || $eqLogic->getEqType_name() === __CLASS__) {
+                self::tracer('info', sprintf(__('%s : la commande de notification %s n\'est pas utilisable (équipement absent, désactivé, ou assistant), rien n\'a été envoyé.', __FILE__),
+                    $this->getHumanName(), $id));
+                return false;
+            }
+
+            $titre = $this->getName();
+            if ($_statut === self::STATUT_CONFIRMATION) {
+                $titre .= ' — ' . __('accord demandé', __FILE__);
+                $question = self::resumeAttente($_attente);
+                if ($question !== '' && strpos($texte, $question) === false) {
+                    $texte .= "\n" . $question;
+                }
+                $texte .= "\n" . sprintf(__('À confirmer dans les %s minutes, depuis la tuile ou la page de l\'assistant.', __FILE__),
+                    (int) round(self::ATTENTE_DUREE / 60));
+            }
+            $cmd->execCmd(array(
+                'title'   => $titre,
+                'message' => self::raccourcir($texte, self::NOTIFICATION_MAX),
+            ));
+            return true;
+        } catch (Throwable $e) {
+            /* Une notification ratée ne doit pas faire perdre le tour : il est
+             * déjà enregistré, et le journal le garde. */
+            self::tracer('error', sprintf(__('%s : la notification n\'est pas partie. %s', __FILE__),
+                $this->getHumanName(), $e->getMessage()));
+            return false;
+        }
     }
 
     /*
@@ -2751,7 +3332,7 @@ class k2000be extends eqLogic {
      * $_maintenant ne sert qu'au rejeu hors ligne, qui doit pouvoir construire
      * deux invites à une minute d'écart sans attendre une minute.
      */
-    public function systemPrompt($_maintenant = null) {
+    public function systemPrompt($_maintenant = null, $_origine = null) {
         $lignes = array();
 
         $persona = trim((string) config::byKey('persona', __CLASS__, 'kitt'));
@@ -2861,6 +3442,27 @@ class k2000be extends eqLogic {
                  * ira chercher par lui-même avec list_rooms. */
                 self::tracer('debug', $e->getMessage());
             }
+        }
+
+        /*
+         * Qui a parlé, quand ce n'est personne. Placé dans la partie qui
+         * change, juste avant l'heure : un tour sur dix tout au plus est
+         * autonome, et la ligne ne doit pas faire perdre le cache aux neuf
+         * autres.
+         *
+         * C'est aussi la seule place où le modèle apprend qu'il n'y a
+         * personne : sans elle, il pose une question à un écran vide —
+         * « voulez-vous que je ferme le volet ? » — et la notification porte
+         * une question à laquelle personne ne peut répondre.
+         */
+        if ($_origine !== null && in_array($_origine, self::ORIGINES_AUTONOMES, true)) {
+            $sources = array(
+                self::ORIGINE_ROUTINE     => 'une routine programmée',
+                self::ORIGINE_DECLENCHEUR => 'un déclencheur, parce qu\'un état de la maison a franchi un seuil',
+                self::ORIGINE_ALERTE      => 'une alerte de surveillance',
+            );
+            $lignes[] = 'Cette demande ne vient pas d\'un humain : c\'est ' . $sources[$_origine] . ' qui t\'a réveillé. Personne n\'attend devant l\'écran, et ta réponse partira telle quelle en notification : sois bref, ne pose pas de question, dis ce que tu as constaté et ce que tu as fait ou proposé. Si rien ne mérite d\'être lu, réponds exactement ' . self::RIEN_A_SIGNALER . ', et rien d\'autre : aucune notification ne partira.';
+            $lignes[] = 'Quand tu agis seul, chaque execute_command doit porter « reason », une phrase qui cite ce que tu as lu. Une action peut t\'être rendue « confirmation_required » même si elle est autorisée : un humain la confirmera ou non plus tard, annonce-la comme une proposition.';
         }
 
         /* L'heure tout à la fin, puisqu'elle change chaque minute. Le modèle

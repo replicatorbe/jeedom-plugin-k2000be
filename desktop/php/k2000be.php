@@ -576,6 +576,69 @@ $eqLogics = eqLogic::byType($plugin->getId());
 								</div>
 							</div>
 						</fieldset>
+
+						<!--
+							Ce qui fait parler l'assistant sans qu'on lui parle. Chaque réveil est
+							une demande facturée : tout ici est vide à la création, et rien ne
+							part tant qu'on n'a rien écrit.
+						-->
+						<fieldset>
+							<legend><i class="fas fa-satellite-dish"></i> {{Autonomie}}</legend>
+
+							<div class="form-group">
+								<label class="col-sm-4 control-label">{{Routines}}</label>
+								<div class="col-sm-8">
+									<textarea class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="routines" rows="4" placeholder="30 6 * * 1-5 | {{Fais le point du matin : trains, pluie, poubelles, ce qui s'est passé cette nuit.}}"></textarea>
+									<span class="help-block" style="margin:6px 0 0 0;">{{Une routine par ligne : une programmation cron à cinq champs (minute heure jour mois jour-de-semaine), une barre « | », puis la consigne. « 0 23 * * * | Vérifie que tout est fermé » réveille l'assistant à 23 h chaque soir, comme si vous le lui demandiez. Une ligne qui commence par « # » suivi d'un espace est mise de côté. Dix routines au plus ; une ligne illisible empêche l'enregistrement plutôt que de se taire. Une routine manquée — box éteinte à l'heure dite — n'est pas rattrapée.}}</span>
+								</div>
+							</div>
+
+							<div class="form-group">
+								<label class="col-sm-4 control-label">{{Déclencheurs}}</label>
+								<div class="col-sm-8">
+									<textarea class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="declencheurs" rows="4" placeholder="#1234# > 66 | {{L'humidité du bureau dépasse 66 % : que faut-il faire ?}}"></textarea>
+									<a class="btn btn-default btn-xs" id="bt_k2000beInsererDeclencheur" style="margin-top:4px;"><i class="fas fa-plus"></i> {{Ajouter un état}}</a>
+									<span class="help-block" style="margin:6px 0 0 0;">{{Un déclencheur par ligne : un état (#identifiant#), une comparaison (>, <, >=, <=, ==, !=), une valeur, une barre « | », puis la consigne. « #1234# change | … » réveille à chaque changement de valeur. L'assistant est réveillé quand la condition DEVIENT vraie, pas tant qu'elle le reste : une humidité au-dessus du seuil pendant trois heures ne fait qu'un réveil. Le premier passage apprend l'état de départ sans rien déclencher, et le « Repos entre deux alertes » s'applique à chaque ligne. Contrôle chaque minute ; dix déclencheurs au plus.}}</span>
+								</div>
+							</div>
+
+							<div class="form-group">
+								<label class="col-sm-4 control-label">{{Quand il agit seul}}</label>
+								<div class="col-sm-8">
+									<select class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="autonome_actions">
+										<option value="proposer">{{Il propose, un humain confirme (recommandé)}}</option>
+										<option value="autorisees">{{Il agit sur ce qui est autorisé, sauf ce qui ouvre, déverrouille ou désarme}}</option>
+										<option value="lecture">{{Il observe et raconte, sans rien actionner}}</option>
+									</select>
+									<span class="help-block" style="margin:6px 0 0 0;">{{Ce que l'assistant a le droit de faire quand c'est une routine, un déclencheur ou une alerte qui l'a réveillé, et non quelqu'un. Ce réglage ne fait que restreindre : il ne rend jamais autorisée une commande qui ne l'est pas dans l'onglet « Autorisations ». « Il propose » transforme chaque commande autorisée en demande de confirmation, portée par la notification ci-dessous et valable cinq minutes. Dans tous les cas, une action décidée seule doit dire pourquoi : sans raison, rien ne part, et la raison est gardée au journal.}}</span>
+								</div>
+							</div>
+
+							<div class="form-group">
+								<label class="col-sm-4 control-label">{{Notifier par}}</label>
+								<div class="col-sm-8">
+									<div class="input-group">
+										<input type="text" class="eqLogicAttr form-control roundedLeft" data-l1key="configuration" data-l2key="notifier_cmd" placeholder="{{aucune notification}}">
+										<span class="input-group-btn">
+											<a class="btn btn-default roundedRight" id="bt_k2000beChoisirNotification"><i class="fas fa-list"></i> {{Choisir}}</a>
+										</span>
+									</div>
+									<span class="help-block" style="margin:6px 0 0 0;">{{Une commande action de type message — notification sur le téléphone, annonce Sonos, bandeau sur la TV. Elle reçoit en titre le nom de l'assistant, en message sa réponse. Elle n'est pas soumise aux autorisations : c'est vous qui la choisissez ici, le modèle n'en écrit que le texte. Quand rien ne mérite d'être lu, le modèle répond « RAS » et rien ne part.}}</span>
+								</div>
+							</div>
+
+							<div class="form-group">
+								<label class="col-sm-4 control-label">{{Notifier quand}}</label>
+								<div class="col-sm-8">
+									<select class="eqLogicAttr form-control" data-l1key="configuration" data-l2key="notifier_quand">
+										<option value="autonome">{{Seulement quand il agit seul (recommandé)}}</option>
+										<option value="toujours">{{À chaque réponse}}</option>
+										<option value="jamais">{{Jamais}}</option>
+									</select>
+									<span class="help-block" style="margin:6px 0 0 0;">{{Celui qui pose une question sur la page a déjà la réponse sous les yeux : par défaut, seules les réponses aux routines, aux déclencheurs et aux alertes partent. Une demande en erreur ne part jamais — elle est au journal.}}</span>
+								</div>
+							</div>
+						</fieldset>
 					</form>
 				</div>
 			</div>
@@ -747,7 +810,7 @@ $eqLogics = eqLogic::byType($plugin->getId());
 						<tbody></tbody>
 					</table>
 					<span class="help-block">{{Ces commandes sont créées et entretenues par le plugin : elles sont ce qu'un scénario peut appeler ou surveiller. Quatre actions : « Demander » prend le texte de la demande comme message, « Confirmer » et « Annuler » répondent à une confirmation en attente, « Nouvelle conversation » vide la mémoire de l'assistant.}}</span>
-					<span class="help-block">{{Sept informations portent le résultat du dernier tour : « Réponse », la phrase de l'assistant ; « Statut », comment le tour s'est terminé (fait, confirmation demandée, refusé, limite atteinte, erreur) ; « Actions exécutées », le nombre de commandes réellement envoyées, historisé ; « Jetons consommés », ce que le tour a coûté, historisé lui aussi — c'est la courbe de consommation du plugin, et de quoi prévenir quand un mois dérape ; « Dernière demande », la date du dernier échange ; « Confirmation en attente », à 1 quand l'assistant attend votre accord ; et « Objet de la confirmation », la phrase qui dit SUR QUOI il l'attend. C'est cette dernière qu'un scénario de notification doit lire : annoncer « K2000 attend votre accord » sans dire sur quoi pousse à confirmer sans savoir, exactement ce que la confirmation doit empêcher.}}</span>
+					<span class="help-block">{{Huit informations portent le résultat du dernier tour : « Origine de la demande », qui a parlé — un identifiant, « scenario », ou « routine », « declencheur », « alerte » quand l'assistant s'est réveillé seul ; « Réponse », la phrase de l'assistant ; « Statut », comment le tour s'est terminé (fait, confirmation demandée, refusé, limite atteinte, erreur) ; « Actions exécutées », le nombre de commandes réellement envoyées, historisé ; « Jetons consommés », ce que le tour a coûté, historisé lui aussi — c'est la courbe de consommation du plugin, et de quoi prévenir quand un mois dérape ; « Dernière demande », la date du dernier échange ; « Confirmation en attente », à 1 quand l'assistant attend votre accord ; et « Objet de la confirmation », la phrase qui dit SUR QUOI il l'attend. C'est cette dernière qu'un scénario de notification doit lire : annoncer « K2000 attend votre accord » sans dire sur quoi pousse à confirmer sans savoir, exactement ce que la confirmation doit empêcher.}}</span>
 				</div>
 			</div>
 		</div>

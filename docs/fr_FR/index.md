@@ -188,11 +188,11 @@ continue de les montrer telles que vous les avez posées, et elles redeviennent
 effectives dès le retour en `actions`. Une étiquette « lecture seule »
 accompagne les compteurs pour le dire.
 
-## Ce dont dispose l'assistant : huit outils
+## Ce dont dispose l'assistant : dix outils
 
-Le modèle ne reçoit pas votre installation. Il reçoit huit outils, qu'il appelle
+Le modèle ne reçoit pas votre installation. Il reçoit dix outils, qu'il appelle
 à sa guise, et dont le plugin filtre systématiquement les résultats selon vos
-autorisations. Un neuvième, `check_alert`, n'apparaît que pour un assistant à
+autorisations. Un onzième, `check_alert`, n'apparaît que pour un assistant à
 qui l'on a déclaré des **états qui décident** : il ne coûte rien aux autres.
 
 | Outil | Ce qu'il envoie | Ce que le plugin lui rend |
@@ -203,9 +203,11 @@ qui l'on a déclaré des **états qui décident** : il ne coûte rien aux autres
 | `get_states` | des identifiants d'états (`command_ids`), trente au plus, et une attente facultative (`wait`, en secondes) | leur valeur, leur unité, leur type générique, la date de leur dernière lecture, et `since` pour un état événementiel — la date de son dernier changement. Quand une attente a été demandée, la réponse porte aussi `waited` — le temps réellement attendu — et chaque état un `refreshed` : voir *Envoyée n'est pas aboutie* |
 | `search` | un texte (`query`) | jusqu'à vingt-cinq équipements et vingt-cinq commandes dont le **nom** contient ce texte — ou, pour un équipement, dont l'un des **types génériques** le contient. Accents et casse ignorés. Un équipement trouvé porte `types`, qui dit ce qu'il est |
 | `get_history` | un identifiant d'état (`command_id`) et une profondeur en heures (`hours` : 24 par défaut, 168 au plus) | cinquante points au plus, et la façon dont ils ont été obtenus — voir plus bas |
+| `get_statistics` | un identifiant d'état historisé (`command_id`) et une profondeur en heures (`hours` : 24 par défaut, 720 au plus) | un résumé calculé par le plugin : minimum et maximum exacts, moyenne, première et dernière moyenne horaire, l'écart entre elles et la tendance (`rising`, `falling`, `stable`), plus une moyenne par jour au-delà de deux jours. Pour un état binaire : le nombre de changements et la part du temps passée à 1. Le modèle n'a plus à faire de calcul de tête sur cinquante points |
+| `get_weather` | rien | tous les états lisibles des équipements météo — reconnus à un état de type générique `WEATHER_*` —, y compris ceux qui n'ont pas de type générique : vigilances, pluie dans l'heure, prévisions horaires. Deux équipements au plus |
 | `check_alert` | une profondeur en heures (`hours` : 12 par défaut, 168 au plus) | un verdict calculé par le plugin — `CONFIRMED`, `NOTHING` ou `UNKNOWN` —, les états décisifs qui l'ont produit, et le reste en contexte. **N'existe que si l'assistant déclare des états décisifs** — voir *Quand la réponse ne peut pas être une opinion* |
 | `get_events` | une profondeur en heures (`hours` : 12 par défaut, 168 au plus) et une pièce facultative (`room`) | ce qui s'est passé récemment dans toute la maison, du plus récent au plus ancien : chaque ligne dit ce qui est arrivé (`started` ou `ended`) et non la valeur d'après. Vingt-cinq lignes au plus, et `more` dit combien ont été laissées de côté — voir plus bas |
-| `execute_command` | un identifiant de commande d'action (`command_id`), la valeur attendue le cas échéant (`value`), et un titre pour les seules commandes de type message (`title`) | le verdict du plugin : `sent`, `simulated`, `confirmation_required` ou `refused`, avec son motif. C'est le seul outil qui puisse modifier quoi que ce soit |
+| `execute_command` | un identifiant de commande d'action (`command_id`), la valeur attendue le cas échéant (`value`), un titre pour les seules commandes de type message (`title`), et la raison de l'action (`reason`) — **obligatoire quand personne n'a rien demandé**, voir *L'assistant qui veille* | le verdict du plugin : `sent`, `simulated`, `confirmation_required` ou `refused`, avec son motif. C'est le seul outil qui puisse modifier quoi que ce soit |
 
 Un identifiant hors de portée reçoit toujours la même réponse — « pas
 disponible pour l'assistant » — qu'il soit inventé, masqué, désactivé ou
@@ -478,6 +480,11 @@ Ce que l'attente coûte, et qu'il vaut mieux savoir :
 - l'attente se prend sur le **budget de temps du tour** : cinq secondes
   attendues sont cinq secondes de moins pour les allers-retours qui font le
   travail ;
+- elle n'est accordée **qu'après une commande réellement envoyée** dans la
+  même demande. Le modèle, à qui l'on répète de vérifier, passait `wait` à
+  toutes ses lectures, et une simple question sur la température coûtait cinq
+  secondes pour rien. Sur une consultation, la valeur en cache est déjà la
+  bonne : la réponse le dit au modèle, et rend la main tout de suite ;
 - elle se déroule **pendant que le verrou de l'assistant est tenu**. Une autre
   demande posée à ce moment-là est refusée, comme n'importe quelle demande
   concurrente — voir *Une demande à la fois*.
@@ -1076,10 +1083,146 @@ Cinq comportements valent d'être connus :
   deux minutes au plus, au lieu d'être refusée comme le serait une demande
   tapée à la main (voir *Une demande à la fois*) ;
 - les demandes nées d'un déclenchement sont journalisées sous l'utilisateur
-  **`alerte`**, jamais sous un nom d'humain.
+  **`alerte`**, jamais sous un nom d'humain ;
+- **une détection ne réveille qu'une fois.** Une règle qui commence puis finit
+  fait deux basculements, et la fin réveillait l'assistant une seconde fois
+  pour raconter la même chose. La fin d'une détection dont on a vu le début ne
+  réveille plus personne ; mais une détection **brève**, montée et retombée
+  entre deux passages, n'est vue que par sa fin, et elle réveille toujours.
+
+La réponse peut désormais partir d'elle-même sur un téléphone : voir
+*L'assistant qui veille*, qui décrit aussi ce que l'assistant a le droit
+d'actionner quand personne ne lui a rien demandé.
 
 Le plafond *Demandes par jour* prend ici tout son sens : c'est le filet sous une
 mécanique qui, par construction, parle sans qu'on le lui demande.
+
+## L'assistant qui veille : routines, déclencheurs, notifications
+
+L'alerte automatique ne réveillait l'assistant que pour une levée de doute. La
+section **Autonomie** de la page d'un assistant généralise la mécanique : il
+peut parler à heure fixe, quand un état franchit un seuil, et vous prévenir
+lui-même. Tout y est vide à la création : rien ne part tant que vous n'avez
+rien écrit, et chaque réveil est une demande facturée.
+
+### Les routines
+
+Une ligne par routine : une programmation cron à cinq champs, une barre `|`,
+puis la consigne, comme vous la taperiez.
+
+```
+30 6 * * 1-5 | Fais le point du matin : premier train, pluie dans les trois heures, poubelles, ce qui s'est passé cette nuit.
+0 23 * * *   | Fais le tour du soir : portes, fenêtres, verrou, portail. Ne signale que ce qui est ouvert.
+# 0 12 * * 0 | ligne mise de côté
+```
+
+- Les formes reconnues sont `*`, `5`, `1-5`, `1,3,5`, `*/15`, `8-18/2` ; le
+  dimanche vaut 0 ou 7. Comme cron, si le jour du mois **et** le jour de la
+  semaine sont restreints, l'un ou l'autre suffit.
+- Une ligne qui commence par `#` suivi d'un espace est mise de côté.
+- Une ligne illisible **empêche l'enregistrement** de l'assistant, avec la
+  raison : ignorée en silence, elle ne partirait jamais.
+- Une routine manquée — box éteinte à l'heure dite — n'est pas rattrapée : un
+  point du matin joué à midi raconterait une maison déjà vide.
+- Dix routines au plus par assistant.
+
+### Les déclencheurs
+
+Une ligne par déclencheur : un état, une comparaison, une valeur, une barre
+`|`, puis la consigne. Le bouton **Ajouter un état** insère l'identifiant d'un
+état choisi dans la liste.
+
+```
+#4512# > 66      | L'humidité du bureau dépasse 66 % : que faut-il faire ?
+#1381# >= 2      | Une vigilance orange vient d'être émise : qu'est-ce que ça change pour la maison ?
+#3077# change    | Le mode de l'alarme a changé : vérifie que rien n'est resté ouvert.
+```
+
+- Comparaisons : `>`, `<`, `>=`, `<=`, `==` (ou `=`), `!=`, et `change`, qui
+  réveille à chaque changement de valeur. Les nombres se comparent en nombres —
+  la virgule décimale est comprise —, le reste en texte, sans casse.
+- L'assistant est réveillé quand la condition **devient** vraie, pas tant
+  qu'elle le reste : une humidité au-dessus du seuil pendant trois heures ne
+  fait qu'un réveil.
+- Le **premier passage** apprend l'état de départ sans rien déclencher :
+  enregistrer l'assistant un soir de canicule ne fait pas partir tous les
+  déclencheurs de température d'un coup.
+- Le **repos entre deux alertes** de l'assistant vaut pour chaque ligne : une
+  valeur qui oscille autour du seuil ne réveille pas toutes les cinq minutes.
+  Un franchissement pendant le repos est oublié, pas reporté.
+- La condition est lue par le plugin, sans passer par le droit de lecture de
+  l'assistant. Le modèle, lui, ne reçoit le nom et la valeur de l'état que s'il
+  a le droit de les lire.
+- Le contrôle a lieu chaque minute ; dix déclencheurs au plus par assistant.
+
+### La notification
+
+Le champ **Notifier par** désigne une commande action de type message —
+notification JeedomConnect, annonce Sonos, bandeau sur la TV. Elle reçoit en
+titre le nom de l'assistant, en message sa réponse. Par défaut, seules les
+réponses nées **sans humain** partent — routines, déclencheurs, alertes — :
+celui qui tape une question sur la page a déjà la réponse sous les yeux. Le
+réglage *Notifier quand* permet aussi « à chaque réponse » ou « jamais ».
+
+Trois choses ne partent pas :
+
+- **« RAS ».** Le modèle est prié de répondre exactement `RAS` quand rien ne
+  mérite d'être lu. Un tour du soir qui n'a rien à dire neuf soirs sur dix ne
+  doit pas vous apprendre à ignorer les notifications ;
+- **une demande en erreur** : elle est au journal, et une panne réseau à trois
+  heures du matin ne mérite pas de réveiller ;
+- tout ce qui viserait une commande qui n'est pas un message, un équipement
+  désactivé, ou un assistant.
+
+Cette commande **n'est pas soumise aux autorisations** de l'onglet du même
+nom : c'est vous qui la choisissez, le modèle n'en écrit que le texte.
+
+La commande d'information **Origine de la demande** dit qui a parlé au dernier
+tour — un identifiant, `scenario`, ou `routine`, `declencheur`, `alerte` — pour
+le scénario qui voudrait traiter différemment les deux cas.
+
+### Ce qu'il a le droit de faire quand personne n'a parlé
+
+Un tour né d'une routine, d'un déclencheur ou d'une alerte n'a personne devant
+l'écran. Le modèle en est prévenu, et le réglage **Quand il agit seul** dit ce
+qu'il peut actionner :
+
+| Réglage | Une commande « Autorisée » | Une commande « Confirmation » |
+|---|---|---|
+| **Il propose** (défaut) | devient une demande de confirmation | reste une demande de confirmation |
+| **Il agit sur ce qui est autorisé** | part, **sauf** si elle ouvre, déverrouille, désarme ou fait sonner — elle devient alors une demande de confirmation | reste une demande de confirmation |
+| **Il observe et raconte** | refusée | refusée |
+
+Ce réglage ne fait que **restreindre** : il ne rend jamais autorisée une
+commande qui ne l'est pas. Une proposition part dans la notification — « accord
+demandé » —, et se confirme comme toute autre, depuis la tuile ou la page,
+dans les cinq minutes.
+
+Dans tous les cas, **une action décidée seule doit dire pourquoi.** Sans le
+paramètre `reason`, rien ne part, et le modèle est prié de recommencer. La
+raison suit la commande jusqu'au journal et à la frise — « Pourquoi : l'humidité
+du bureau est à 68 % depuis trois heures » — et jusqu'à la notification qui
+demande votre accord. Une demande tapée par un humain n'a pas à se justifier :
+sa phrase en tient lieu.
+
+### Ce qu'on peut lui confier
+
+Quelques idées qui tirent parti de ce qu'aucune règle fixe ne sait faire —
+croiser plusieurs sources, et le dire en français :
+
+- **le point du matin** : trains et retards, pluie dans les trois heures,
+  collecte du jour, ce qui s'est passé la nuit (`get_events`) ;
+- **le tour du soir** : ouvertures, verrou, portail, gel annoncé, poubelles à
+  sortir — une seule notification, ou `RAS` ;
+- **l'humidité ou le CO2** qui franchit un seuil : comparer à l'extérieur
+  (`get_weather`) avant de proposer d'aérer ou de lancer la VMC ;
+- **une vigilance qui tombe** : dire ce qu'elle change pour les volets, le
+  linge, la voiture ;
+- **une fois par semaine, ce qui ment dans la maison** : capteurs muets depuis
+  des jours, contacts figés, valeurs incohérentes — en lecture seule, sans
+  aucun risque.
+
+Le plafond *Demandes par jour* est le filet sous tout cela.
 
 ## Spécialiser un assistant
 

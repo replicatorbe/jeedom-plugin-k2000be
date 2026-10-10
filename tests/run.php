@@ -451,7 +451,7 @@ section('Création de l\'assistant');
 check('l\'équipement reçoit son identifiant', $kitt->getId(), 20);
 check('preSave l\'active', (int) $kitt->getIsEnable(), 1);
 check('la tuile est assez large pour écrire', $kitt->display['width'], '480px');
-check('onze commandes créées', count($kitt->getCmdList()), 11);
+check('douze commandes créées', count($kitt->getCmdList()), 12);
 check('la demande est la seule commande visible', (int) $kitt->getCmd('action', 'ask')->getIsVisible(), 1);
 check('le titre du message est désactivé', $kitt->getCmd('action', 'ask')->display['title_disable'], 1);
 check('le compte d\'actions est historisé', (int) $kitt->getCmd('info', 'actions')->getIsHistorized(), 1);
@@ -459,7 +459,7 @@ check('le compte de jetons aussi', (int) $kitt->getCmd('info', 'jetons')->getIsH
 check('la réponse ne l\'est pas', (int) $kitt->getCmd('info', 'reply')->getIsHistorized(), 0);
 /* Idempotence : le cœur rappelle postSave() à chaque enregistrement. */
 $kitt->createCommands();
-check('un second enregistrement n\'en crée pas d\'autres', count($kitt->getCmdList()), 11);
+check('un second enregistrement n\'en crée pas d\'autres', count($kitt->getCmdList()), 12);
 /* Comparée à info.json et non à un numéro écrit ici : sinon chaque nouvelle
  * version fait échouer ce contrôle, qui ne vérifie pourtant que la lecture. */
 $infoJson = json_decode(file_get_contents(__DIR__ . '/../plugin_info/info.json'), true);
@@ -898,7 +898,7 @@ config::save('historyArchiveTime', 2, 'core');
 check('un outil inconnu devient un résultat d\'erreur', outil('bidule')['resultat']['status'], 'error');
 check('une commande sans identifiant aussi',
     outil('execute_command', array())['resultat']['status'], 'error');
-check('le catalogue compte huit outils', count(k2000beOutils::definitions()), 8);
+check('le catalogue compte dix outils', count(k2000beOutils::definitions()), 10);
 
 /* =============================================================== BOUCLE */
 section('La boucle de conversation');
@@ -914,7 +914,7 @@ check('la réponse du modèle est rendue telle quelle', $retour['reponse'], 'La 
 check('deux allers-retours', count(rejeu::$charges), 2);
 check('une étape dans la frise', count($retour['etapes']), 1);
 check('les jetons des deux appels sont cumulés', $retour['jetons']['total'], 370);
-check('le catalogue d\'outils est envoyé', count(rejeu::charge(0)['tools']), 8);
+check('le catalogue d\'outils est envoyé', count(rejeu::charge(0)['tools']), 10);
 check('le modèle choisit lui-même', rejeu::charge(0)['tool_choice'], 'auto');
 check('l\'invite système ouvre la conversation', rejeu::charge(1)['messages'][0]['role'], 'system');
 check('un message tool par tool_call_id', integriteOutils(rejeu::charge(1)['messages']), 0);
@@ -2319,7 +2319,7 @@ $lampeMuette = creerCommande(211, $lents, 'État lampe', 'info', 'binary', array
     'generique' => 'LIGHT_STATE', 'valeur' => '0',
 ));
 k2000beSecurite::oublier();
-k2000beOutils::nouvelleDemande();
+k2000beOutils::nouvelleDemande(true);
 
 /* Le cumul déjà dépensé, qu'il faut pouvoir poser sans attendre quinze
  * secondes pour de vrai. */
@@ -2363,7 +2363,7 @@ check('la commande a été relue plusieurs fois pendant l\'attente',
 /* L'équipement muet : l'attente va jusqu'au bout du délai, sans le dépasser,
  * et le modèle apprend que l'équipement n'a rien dit — ce qui n'est pas la
  * même chose qu'une valeur inchangée. */
-k2000beOutils::nouvelleDemande();
+k2000beOutils::nouvelleDemande(true);
 $depart = microtime(true);
 $silence = outil('get_states', array('command_ids' => array(211), 'wait' => 2));
 $duree = microtime(true) - $depart;
@@ -2383,7 +2383,7 @@ check('et le modèle apprend qu\'il n\'a rien dit',
  * mais son plugin la relève quand même. Guetter la valeur ferait attendre en
  * vain à chaque commande sans effet visible.
  */
-k2000beOutils::nouvelleDemande();
+k2000beOutils::nouvelleDemande(true);
 $lampeMuette->parleA = microtime(true) + 1;
 $lampeMuette->parleValeur = '0';
 $inchange = outil('get_states', array('command_ids' => array(211), 'wait' => 6));
@@ -2425,7 +2425,7 @@ check('le modèle sait que le budget est dépensé',
 
 /* Un nouveau tour rend le budget : un scénario qui enchaîne deux demandes dans
  * le même processus PHP ne doit pas voir la seconde privée d'attente. */
-k2000beOutils::nouvelleDemande();
+k2000beOutils::nouvelleDemande(true);
 check('un nouveau tour rend le budget d\'attente',
     invoquerClasse('k2000beOutils', 'attenteAccordee', array(5)), 5.0);
 
@@ -3100,14 +3100,14 @@ k2000beSecurite::oublier();
 /* Sans déclaration, l'outil n'existe pas : il ne coûte pas un jeton aux
  * assistants qui n'en ont que faire. */
 $kitt->setConfiguration('verdict_types', '');
-check('sans état décisif déclaré, le catalogue reste à huit outils',
-    count(k2000beOutils::definitions($kitt)), 8);
+check('sans état décisif déclaré, le catalogue reste à dix outils',
+    count(k2000beOutils::definitions($kitt)), 10);
 check('et l\'outil refuse poliment s\'il est appelé quand même',
     k2000beOutils::executer('check_alert', array(), $kitt)['resultat']['status'], 'error');
 
 $kitt->setConfiguration('verdict_types', 'alarm_state');
 check('la déclaration est normalisée en majuscules', $kitt->typesDecisifs(), array('ALARM_STATE'));
-check('déclaré, l\'outil apparaît', count(k2000beOutils::definitions($kitt)), 9);
+check('déclaré, l\'outil apparaît', count(k2000beOutils::definitions($kitt)), 11);
 
 /* La règle a tiré il y a trois heures : le verdict est un fait, pas une
  * appréciation. */
@@ -3679,6 +3679,415 @@ check('la purge reportée est journalisée',
     strpos(log::texte(), 'purge des conversations reportée') !== false, true);
 eqLogic::$tous = $assistantsEnBase;
 k2000beSecurite::oublier();
+
+/* ===================================================== DOMOTIQUE 2.0 */
+section('Le mode illisible retombe sur la lecture seule');
+
+/*
+ * Le défaut du .ini masquait le défaut du code : une valeur vide rendait
+ * « actions ». On retire le .ini le temps de l'essai, comme sur un plugin
+ * déployé à la main sans lui.
+ */
+$iniPlugin = new ReflectionProperty('config', 'ini');
+$iniPlugin->setAccessible(true);
+$iniSauve = $iniPlugin->getValue();
+$iniPlugin->setValue(null, array_merge($iniSauve, array('k2000be' => array())));
+reglage('securite', '');
+check('un mode vide sans .ini donne la lecture seule', k2000beSecurite::mode(), 'lecture');
+$iniPlugin->setValue(null, $iniSauve);
+reglage('securite', '');
+check('avec le .ini, c\'est son défaut qui s\'applique', k2000beSecurite::mode(), 'simulation');
+reglage('securite', 'actions');
+k2000beSecurite::oublier();
+
+section('L\'attente ne sert qu\'après une action');
+
+/* Une consultation pure : l'état en cache est déjà le bon. Le modèle passait
+ * pourtant « wait » à chaque lecture, et chaque question coûtait cinq
+ * secondes. */
+k2000beOutils::nouvelleDemande();
+$depart = microtime(true);
+$consultation = outil('get_states', array('command_ids' => array(210), 'wait' => 3));
+check('sans commande envoyée, on ne dort pas', (microtime(true) - $depart) < 0.3, true);
+check('rien n\'est attendu', $consultation['resultat']['waited'], 0.0);
+check('et le modèle apprend pourquoi',
+    strpos($consultation['resultat']['note'], 'no command has been sent') !== false, true);
+
+cmd::vider();
+outil('execute_command', array('command_id' => 101));
+$depart = microtime(true);
+$apres = outil('get_states', array('command_ids' => array(211), 'wait' => 1));
+check('une commande partie rouvre l\'attente', (microtime(true) - $depart) > 0.9, true);
+check('et elle est rendue au modèle', $apres['resultat']['waited'] > 0.5, true);
+k2000beOutils::nouvelleDemande();
+cmd::vider();
+
+section('Les programmations des routines');
+
+/* Le lundi 12 octobre 2026 à 6 h 30, le dimanche 11 à 6 h. */
+$lundi = mktime(6, 30, 0, 10, 12, 2026);
+/* Le même lundi, des semaines plus tard. Par mktime() et non en ajoutant des
+ * jours de 86 400 secondes : le passage à l'heure d'hiver du 25 octobre ferait
+ * tomber la routine à 5 h 30. */
+$lundiPlus = function ($_semaines) {
+    return mktime(6, 30, 0, 10, 12 + 7 * $_semaines, 2026);
+};
+$dimanche = mktime(6, 0, 0, 10, 11, 2026);
+check('les jours de semaine à 6 h 30', k2000be::cronCorrespond('30 6 * * 1-5', $lundi), true);
+check('pas le week-end', k2000be::cronCorrespond('30 6 * * 0,6', $lundi), false);
+check('toutes les quinze minutes', k2000be::cronCorrespond('*/15 * * * *', $lundi), true);
+check('une autre minute ne part pas', k2000be::cronCorrespond('31 6 * * *', $lundi), false);
+check('un pas sur une plage', k2000be::cronCorrespond('30 4-8/2 * * *', $lundi), true);
+check('le dimanche s\'écrit aussi 7', k2000be::cronCorrespond('0 6 * * 7', $dimanche), true);
+check('jour du mois OU jour de semaine, comme cron',
+    k2000be::cronCorrespond('30 6 1 * 1', $lundi), true);
+check('et ni l\'un ni l\'autre ne part pas',
+    k2000be::cronCorrespond('30 6 1 * 2', $lundi), false);
+check('quatre champs ne se lisent pas', k2000be::cronCorrespond('* * * *', $lundi), null);
+check('une minute 60 non plus', k2000be::cronCorrespond('60 * * * *', $lundi), null);
+check('ni des lettres', k2000be::cronCorrespond('a b c d e', $lundi), null);
+
+$routinesLues = k2000be::analyserRoutines("30 6 * * 1-5 | Fais le point du matin.\n\n# 0 7 * * * | mise de côté\n0 23 * * * |\nn'importe quoi | consigne");
+check('une routine valide est retenue', count($routinesLues['valides']), 1);
+check('une ligne commentée est ignorée sans erreur', count($routinesLues['erreurs']), 2);
+check('la consigne est lue après la barre', $routinesLues['valides'][0]['consigne'], 'Fais le point du matin.');
+
+section('Une routine réveille l\'assistant');
+
+creerPiece(7, 'Bureau');
+$telephone = creerEquipement(70, 'Téléphone', 'jeedomconnect', 7);
+creerCommande(700, $telephone, 'Notifier', 'action', 'message');
+creerCommande(701, $telephone, 'Batterie', 'info', 'numeric', array('valeur' => '80'));
+$bureau = creerEquipement(71, 'Capteur bureau', 'mqtt', 7);
+$humidite = creerCommande(710, $bureau, 'Humidité', 'info', 'numeric', array('valeur' => '60', 'unite' => '%'));
+$modeAlarme = creerCommande(711, $bureau, 'Mode', 'info', 'string', array('valeur' => 'désarmé'));
+creerCommande(712, $bureau, 'Déverrouiller', 'action', 'other', array('generique' => 'LOCK_OPEN', 'politique' => 'allow'));
+k2000beSecurite::oublier();
+
+$veilleur = new k2000be();
+$veilleur->setName('Veilleur');
+$veilleur->setEqType_name('k2000be');
+$veilleur->setObject_id(7);
+$veilleur->save();
+$veilleur->setConfiguration('routines', "30 6 * * 1-5 | Fais le point du matin.\n# 0 7 * * * | mise de côté");
+$veilleur->setConfiguration('notifier_cmd', '#700#');
+check('l\'assistant porte la commande « Origine »', is_object($veilleur->getCmd('info', 'origine')), true);
+
+cron::vider();
+check('à l\'heure dite, une routine part', $veilleur->routines($lundi), 1);
+check('dans une tâche de fond', count(cron::$taches), 1);
+$tacheRoutine = reset(cron::$taches);
+check('qui dit qu\'elle vient d\'une routine', $tacheRoutine->getOption()['origine'], 'routine');
+check('et porte la consigne', $tacheRoutine->getOption()['message'], 'Fais le point du matin.');
+check('la même minute ne la relance pas', $veilleur->routines($lundi), 0);
+check('la minute suivante non plus', $veilleur->routines($lundi + 60), 0);
+check('le week-end, rien', $veilleur->routines($dimanche + 1800), 0);
+
+rejeu::scenario(array(reponseTexte('Bonjour. Tout est calme, rien n\'a bougé cette nuit.')));
+check('le cœur joue la routine', cron::jouerLancees(), 1);
+$inviteRoutine = rejeu::charge(0)['messages'][0]['content'];
+check('l\'invite dit au modèle que personne n\'a parlé',
+    strpos($inviteRoutine, 'ne vient pas d\'un humain') !== false, true);
+check('et qu\'il peut se taire',
+    strpos($inviteRoutine, 'réponds exactement RAS') !== false, true);
+check('le journal attribue la demande à la routine',
+    k2000beJournal::historique($veilleur->getId(), 1)[0]['utilisateur'], 'routine');
+check('la commande « Origine » le dit aussi', $veilleur->publies['origine'], 'routine');
+check('la réponse part en notification', count(cmd::$envois), 1);
+check('vers la commande choisie', cmd::$envois[0]['id'], 700);
+check('titrée du nom de l\'assistant', cmd::$envois[0]['options']['title'], 'Veilleur');
+check('avec le texte de la réponse',
+    strpos(cmd::$envois[0]['options']['message'], 'Tout est calme') !== false, true);
+
+/* Rien à signaler : rien ne part. */
+cron::vider();
+$veilleur->routines($lundiPlus(1));
+rejeu::scenario(array(reponseTexte('RAS')));
+cron::jouerLancees();
+check('« RAS » ne réveille pas le téléphone', count(cmd::$envois), 0);
+check('mais la réponse est publiée', $veilleur->publies['reply'], 'RAS');
+
+/* Une question posée par quelqu'un a déjà sa réponse sous les yeux. */
+rejeu::scenario(array(reponseTexte('Il fait 21 °C.')));
+$veilleur->ask('Quelle température ?');
+check('une question humaine ne notifie pas par défaut', count(cmd::$envois), 0);
+check('et « Origine » nomme qui a parlé', $veilleur->publies['origine'], 'scenario');
+$veilleur->setConfiguration('notifier_quand', 'toujours');
+rejeu::scenario(array(reponseTexte('Il fait 21 °C.')));
+$veilleur->ask('Quelle température ?');
+check('réglée sur « toujours », elle notifie', count(cmd::$envois), 1);
+$veilleur->setConfiguration('notifier_quand', 'jamais');
+cron::vider();
+$veilleur->routines($lundiPlus(2));
+rejeu::scenario(array(reponseTexte('La porte est ouverte.')));
+cron::jouerLancees();
+check('réglée sur « jamais », même une routine se tait', count(cmd::$envois), 0);
+$veilleur->setConfiguration('notifier_quand', 'autonome');
+
+/* Une commande qui n'est pas un message ne reçoit rien. */
+$veilleur->setConfiguration('notifier_cmd', '701');
+cron::vider();
+$veilleur->routines($lundiPlus(3));
+rejeu::scenario(array(reponseTexte('La porte est ouverte.')));
+check('une commande info en guise de notification ne casse rien', cron::jouerLancees(), 1);
+check('et rien ne lui est envoyé', count(cmd::$envois), 0);
+$veilleur->setConfiguration('notifier_cmd', '#700#');
+
+/* Une routine mal écrite est refusée à l'enregistrement, pas tue. */
+$veilleur->setConfiguration('routines', '30 25 * * * | Jamais.');
+$refusee = false;
+try {
+    $veilleur->save();
+} catch (Exception $e) {
+    $refusee = (strpos($e->getMessage(), 'cinq champs') !== false);
+}
+check('une routine illisible empêche l\'enregistrement, et dit pourquoi', $refusee, true);
+$veilleur->setConfiguration('routines', '30 6 * * 1-5 | Fais le point du matin.');
+
+section('Un déclencheur réveille l\'assistant');
+
+$declLus = k2000be::analyserDeclencheurs("#710# > 66 | Trop humide.\n711 change | Le mode a changé.\n#710# > | rien\nhumidité > 3 | non\n#710# >= 26,5 |");
+check('deux déclencheurs valides', count($declLus['valides']), 2);
+check('trois lignes fautives signalées', count($declLus['erreurs']), 3);
+check('« = » est lu comme « == »', k2000be::analyserDeclencheurs('#1# = on | x')['valides'][0]['operateur'], '==');
+check('la virgule décimale française est comprise', k2000be::conditionVraie('26,5', '>', '26'), true);
+check('le texte se compare sans casse', k2000be::conditionVraie('on', '==', 'ON'), true);
+check('un « > » entre deux textes est faux', k2000be::conditionVraie('abc', '>', 'b'), false);
+
+$veilleur->setConfiguration('declencheurs', "#710# > 66 | L'humidité du bureau est trop haute.\n#711# change | Le mode d'alarme a changé.");
+$veilleur->setConfiguration('alerte_repos', 15);
+cron::vider();
+$t0 = time();
+check('le premier passage apprend l\'état sans déclencher', $veilleur->declencheurs($t0), 0);
+$humidite->value = '70';
+$modeAlarme->value = 'armé';
+check('le franchissement réveille, et le changement aussi', $veilleur->declencheurs($t0 + 60), 2);
+$tachesDecl = array_values(cron::$taches);
+check('la tâche dit qu\'elle vient d\'un déclencheur', $tachesDecl[0]->getOption()['origine'], 'declencheur');
+check('la consigne est suivie de l\'état et de sa valeur',
+    strpos($tachesDecl[0]->getOption()['message'], '« Capteur bureau — Humidité » vaut 70 %') !== false, true);
+cron::vider();
+$humidite->value = '72';
+check('rester au-dessus du seuil ne réveille plus', $veilleur->declencheurs($t0 + 120), 0);
+$humidite->value = '60';
+$veilleur->declencheurs($t0 + 180);
+$humidite->value = '70';
+check('un nouveau franchissement pendant le repos est oublié', $veilleur->declencheurs($t0 + 240), 0);
+$humidite->value = '60';
+$veilleur->declencheurs($t0 + 60 + 16 * 60);
+$humidite->value = '71';
+check('le repos échu, il repart', $veilleur->declencheurs($t0 + 60 + 17 * 60), 1);
+cron::vider();
+
+/* Le modèle n'apprend le nom et la valeur que s'il a le droit de les lire. */
+$humidite->setConfiguration('k2000beRead', 'deny');
+k2000beSecurite::oublier();
+$humidite->value = '60';
+$veilleur->declencheurs($t0 + 3600);
+$humidite->value = '75';
+$veilleur->declencheurs($t0 + 7200);
+$tachesDecl = array_values(cron::$taches);
+check('un état masqué déclenche quand même', count($tachesDecl), 1);
+check('mais son nom ne part pas au modèle',
+    strpos($tachesDecl[0]->getOption()['message'], 'Humidité') === false, true);
+$humidite->setConfiguration('k2000beRead', '');
+k2000beSecurite::oublier();
+cron::vider();
+
+section('Quand personne n\'a parlé');
+
+check('par défaut, une action autorisée devient une proposition',
+    k2000beSecurite::controler(101, null, 'proposer')['decision'], 'confirm');
+check('« autorisées » la laisse partir',
+    k2000beSecurite::controler(101, null, 'autorisees')['decision'], 'allow');
+check('sauf si elle engage la sécurité du logement',
+    k2000beSecurite::controler(712, null, 'autorisees')['decision'], 'confirm');
+check('« lecture » ne laisse rien partir',
+    k2000beSecurite::controler(101, null, 'lecture')['decision'], 'deny');
+check('l\'autonomie n\'autorise jamais ce qui est interdit',
+    k2000beSecurite::controler(102, null, 'autorisees')['decision'], 'deny');
+check('un réglage inconnu vaut « proposer »',
+    k2000beSecurite::controler(101, null, 'tout')['decision'], 'confirm');
+check('un humain garde ses autorisations',
+    k2000beSecurite::controler(101, null, null)['decision'], 'allow');
+check('la proposition dit pourquoi elle demande',
+    strpos(k2000beSecurite::controler(101, null, 'proposer')['motif'], 'agit seul') !== false, true);
+
+k2000beOutils::nouvelleDemande(false, 'autorisees');
+cmd::vider();
+$sansRaison = outil('execute_command', array('command_id' => 101));
+check('seul, sans raison, rien ne part', $sansRaison['resultat']['status'], 'error');
+check('et rien n\'a été envoyé', count(cmd::$envois), 0);
+$avecRaison = outil('execute_command', array('command_id' => 101, 'reason' => 'La pièce est sombre  et occupée.'));
+check('avec une raison, l\'action part', $avecRaison['resultat']['status'], 'sent');
+check('la raison accompagne l\'étape, sur une ligne',
+    $avecRaison['etape']['raison'], 'La pièce est sombre et occupée.');
+k2000beOutils::nouvelleDemande();
+cmd::vider();
+check('un humain n\'a pas à se justifier',
+    outil('execute_command', array('command_id' => 101))['resultat']['status'], 'sent');
+cmd::vider();
+
+$definitionsAction = array();
+foreach (k2000beOutils::definitions() as $definition) {
+    $definitionsAction[$definition['function']['name']] = $definition['function'];
+}
+check('execute_command annonce la raison',
+    isset($definitionsAction['execute_command']['parameters']['properties']['reason']), true);
+
+/* Le tour entier : une routine propose, quelqu'un confirme. */
+$veilleur->setConfiguration('autonome_actions', 'proposer');
+cron::vider();
+$veilleur->routines($lundiPlus(4));
+rejeu::scenario(array(
+    reponseOutils(array(array('outil' => 'execute_command',
+        'args' => array('command_id' => 101, 'reason' => 'Il fait encore nuit et quelqu\'un est levé.')))),
+    reponseTexte('Je propose d\'allumer la lumière du salon.'),
+));
+cron::jouerLancees();
+check('la routine s\'arrête sur une proposition',
+    $veilleur->publies['status'], k2000be::STATUT_CONFIRMATION);
+check('rien n\'est parti vers la maison', count(array_filter(cmd::$envois, function ($_e) { return $_e['id'] === 101; })), 0);
+check('la notification demande un accord',
+    strpos(cmd::$envois[0]['options']['title'], 'accord demandé') !== false, true);
+check('et nomme ce qui est proposé',
+    strpos(cmd::$envois[0]['options']['message'], 'Lumière salon') !== false, true);
+$journalProposition = k2000beJournal::historique($veilleur->getId(), 1)[0];
+check('le journal garde la raison de la proposition',
+    $journalProposition['etapes'][0]['raison'], 'Il fait encore nuit et quelqu\'un est levé.');
+
+$attenteVeilleur = $veilleur->attente();
+rejeu::scenario(array(reponseTexte('La lumière du salon est allumée.')));
+$confirme = $veilleur->confirm($attenteVeilleur['jeton'], true);
+check('un humain confirme : la commande part',
+    count(array_filter(cmd::$envois, function ($_e) { return $_e['id'] === 101; })), 1);
+check('et la raison suit jusqu\'au journal',
+    k2000beJournal::historique($veilleur->getId(), 1)[0]['etapes'][0]['raison'],
+    'Il fait encore nuit et quelqu\'un est levé.');
+
+/* « autorisées » : la routine agit seule. */
+$veilleur->setConfiguration('autonome_actions', 'autorisees');
+cron::vider();
+$veilleur->routines($lundiPlus(5));
+rejeu::scenario(array(
+    reponseOutils(array(array('outil' => 'execute_command',
+        'args' => array('command_id' => 101, 'reason' => 'Lever programmé.')))),
+    reponseTexte('J\'ai allumé la lumière du salon.'),
+));
+cron::jouerLancees();
+check('réglé sur « autorisées », la routine agit seule',
+    count(array_filter(cmd::$envois, function ($_e) { return $_e['id'] === 101; })), 1);
+check('et le dit dans la notification',
+    strpos(end(cmd::$envois)['options']['message'], 'allumé') !== false, true);
+cmd::vider();
+
+section('Les statistiques');
+
+$statsVolet = outil('get_statistics', array('command_id' => 110));
+check('le minimum est exact', $statsVolet['resultat']['min'], 41.0);
+check('le maximum aussi', $statsVolet['resultat']['max'], 100.0);
+check('la tendance est calculée', $statsVolet['resultat']['trend'], 'rising');
+check('la valeur actuelle accompagne le résumé', isset($statsVolet['resultat']['now']), true);
+check('l\'unité aussi', $statsVolet['resultat']['unit'], '%');
+check('sur un jour, pas de moyenne par jour', isset($statsVolet['resultat']['by_day']), false);
+check('sur trois jours, une moyenne par jour',
+    isset(outil('get_statistics', array('command_id' => 110, 'hours' => 72))['resultat']['by_day']), true);
+check('la période est plafonnée à trente jours',
+    outil('get_statistics', array('command_id' => 110, 'hours' => 9999))['resultat']['hours'], 720);
+check('un état non historisé le dit',
+    outil('get_statistics', array('command_id' => 100))['resultat']['status'], 'no_history');
+$statsInterdit = outil('get_statistics', array('command_id' => 131));
+check('un état interdit ne rend rien', $statsInterdit['resultat']['status'], 'error');
+check('pas même son nom', fuites($statsInterdit), array());
+
+$porteBureau = creerCommande(713, $bureau, 'Fenêtre', 'info', 'binary', array('valeur' => '1', 'historise' => 1));
+history::$points[713] = array(
+    array(date('Y-m-d H:i:s', time() - 10 * 3600), '0'),
+    array(date('Y-m-d H:i:s', time() - 8 * 3600), '1'),
+    array(date('Y-m-d H:i:s', time() - 6 * 3600), '0'),
+    array(date('Y-m-d H:i:s', time() - 2 * 3600), '1'),
+);
+k2000beSecurite::oublier();
+$statsFenetre = outil('get_statistics', array('command_id' => 713, 'hours' => 12));
+check('un binaire compte ses changements', $statsFenetre['resultat']['changes'], 3);
+check('et le temps passé à 1',
+    $statsFenetre['resultat']['on_minutes'] >= 238 && $statsFenetre['resultat']['on_minutes'] <= 241, true);
+check('en part de la période', round($statsFenetre['resultat']['on_share'], 2), 0.33);
+
+section('La météo');
+
+check('sans équipement météo, l\'outil le dit',
+    outil('get_weather')['resultat']['status'], 'no_weather');
+$station = creerEquipement(72, 'Météo test', 'meteo', 7);
+creerCommande(720, $station, 'Température', 'info', 'numeric', array('generique' => 'WEATHER_TEMPERATURE', 'valeur' => '12', 'unite' => '°C'));
+creerCommande(721, $station, 'Vigilance', 'info', 'string', array('valeur' => 'jaune'));
+creerCommande(722, $station, 'Code secret météo', 'info', 'string', array('valeur' => 'x', 'lecture' => 'deny'));
+k2000beSecurite::oublier();
+$meteo = outil('get_weather');
+check('la station est reconnue à son type générique', $meteo['resultat']['stations'][0]['device'], 'Météo test');
+$nomsMeteo = array_column($meteo['resultat']['stations'][0]['states'], 'name');
+check('ses états sans type générique viennent avec', in_array('Vigilance', $nomsMeteo, true), true);
+check('mais pas ceux qu\'on ne peut pas lire', in_array('Code secret météo', $nomsMeteo, true), false);
+check('le capteur du bureau n\'est pas pris pour une station', count($meteo['resultat']['stations']), 1);
+$station->setConfiguration('k2000beHidden', 1);
+k2000beSecurite::oublier();
+check('une station masquée disparaît', outil('get_weather')['resultat']['status'], 'no_weather');
+$station->setConfiguration('k2000beHidden', 0);
+k2000beSecurite::oublier();
+
+section('Une détection ne réveille qu\'une fois');
+
+/*
+ * Une détection qui commence puis finit fait deux basculements : seul le
+ * premier doit réveiller. Mais une détection brève, montée et retombée entre
+ * deux passages, n'est vue que par sa fin, et doit réveiller quand même.
+ */
+$regleVeilleur = creerEquipement(73, 'Detection SUD', 'nvr', 7);
+$declenchee = creerCommande(730, $regleVeilleur, 'Déclenchée', 'info', 'binary', array(
+    'generique' => 'ALARM_STATE', 'valeur' => '0', 'historise' => 1,
+));
+$veilleur->setConfiguration('verdict_types', 'ALARM_STATE');
+$veilleur->setConfiguration('alerte_auto', 1);
+$veilleur->setConfiguration('alerte_si', '');
+$veilleur->setConfiguration('alerte_vu', 0);
+$veilleur->setConfiguration('alerte_derniere', 0);
+$veilleur->setConfiguration('alerte_repos', 1);
+$declenchee->value = '0';
+$declenchee->valueDate = date('Y-m-d H:i:s', time() - 60);
+k2000beSecurite::oublier();
+cron::vider();
+$veilleur->surveiller();
+$declenchee->value = '1';
+$declenchee->valueDate = date('Y-m-d H:i:s', time() + 1);
+check('le début d\'une détection réveille', $veilleur->surveiller(), true);
+$veilleur->setConfiguration('alerte_derniere', time() - 3600);
+$declenchee->value = '0';
+$declenchee->valueDate = date('Y-m-d H:i:s', time() + 2);
+check('sa fin ne réveille pas une seconde fois', $veilleur->surveiller(), false);
+$declenchee->valueDate = date('Y-m-d H:i:s', time() + 3);
+check('une détection brève, vue par sa seule fin, réveille', $veilleur->surveiller(), true);
+$veilleur->setConfiguration('alerte_auto', 0);
+cron::vider();
+
+section('La santé dit qui veille');
+
+$santeAutonomie = null;
+foreach (k2000be::health() as $ligne) {
+    if ($ligne['test'] === 'Autonomie') {
+        $santeAutonomie = $ligne;
+    }
+}
+check('la page Santé compte les routines et les déclencheurs',
+    strpos($santeAutonomie['result'], '1 routine(s), 2 déclencheur(s)') !== false, true);
+check('un assistant qui notifie n\'est pas signalé', $santeAutonomie['advice'], '');
+$veilleur->setConfiguration('notifier_cmd', '');
+foreach (k2000be::health() as $ligne) {
+    if ($ligne['test'] === 'Autonomie') {
+        $santeAutonomie = $ligne;
+    }
+}
+check('une veille sans sortie l\'est', strpos($santeAutonomie['advice'], 'Veilleur') !== false, true);
+$veilleur->setConfiguration('notifier_cmd', '#700#');
 
 /* =============================================================== BILAN */
 echo "\n" . str_repeat('=', 78) . "\n";

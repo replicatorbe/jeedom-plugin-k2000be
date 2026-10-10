@@ -368,6 +368,12 @@ function k2000beEtapesNode(_etapes, _statut) {
       corps.appendChild(document.createElement('br'))
       k2000beTexte(corps, 'k2000beEtapeDetail', etape.detail)
     }
+    /* Le pourquoi d'une action, quand le modèle l'a donné : devant un volet
+       fermé que personne n'a demandé, c'est la ligne qu'on cherche. */
+    if (String(init(etape.raison, '')) !== '') {
+      corps.appendChild(document.createElement('br'))
+      k2000beTexte(corps, 'k2000beEtapeDetail', '{{Pourquoi :}} ' + etape.raison)
+    }
     ligne.appendChild(corps)
 
     /* Le nom de l'outil est technique : il sert au dépannage, pas à la lecture
@@ -2168,6 +2174,38 @@ k2000beContainer.addEventListener('click', function (_event) {
       /* Le cœur écoute « change » pour savoir qu'il reste quelque chose à
          sauvegarder : une valeur posée par un script ne l'émet pas. */
       champ.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    return
+  }
+  if (target.closest('#bt_k2000beChoisirNotification') !== null) {
+    _event.preventDefault()
+    if (typeof jeedom === 'undefined' || !isset(jeedom.cmd) || !isset(jeedom.cmd.getSelectModal)) { return }
+    jeedom.cmd.getSelectModal({ cmd: { type: 'action', subType: 'message' } }, function (result) {
+      if (!isset(result.cmd) || !isset(result.cmd.id) || result.cmd.id === '') { return }
+      var id = parseInt(String(result.cmd.id).replace(/#/g, ''), 10)
+      if (isNaN(id) || id <= 0) { return }
+      var champ = document.querySelector('.eqLogicAttr[data-l2key="notifier_cmd"]')
+      if (champ === null) { return }
+      champ.value = String(id)
+      champ.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    return
+  }
+  /* Ajoute une ligne de déclencheur à compléter : l'identifiant d'un état est
+     ce qu'on ne connaît jamais par cœur, le reste s'écrit au clavier. */
+  if (target.closest('#bt_k2000beInsererDeclencheur') !== null) {
+    _event.preventDefault()
+    if (typeof jeedom === 'undefined' || !isset(jeedom.cmd) || !isset(jeedom.cmd.getSelectModal)) { return }
+    jeedom.cmd.getSelectModal({ cmd: { type: 'info' } }, function (result) {
+      if (!isset(result.cmd) || !isset(result.cmd.id) || result.cmd.id === '') { return }
+      var id = parseInt(String(result.cmd.id).replace(/#/g, ''), 10)
+      if (isNaN(id) || id <= 0) { return }
+      var zone = document.querySelector('.eqLogicAttr[data-l2key="declencheurs"]')
+      if (zone === null) { return }
+      var avant = zone.value.replace(/\s+$/, '')
+      zone.value = (avant === '' ? '' : avant + '\n') + '#' + id + '# > 0 | '
+      zone.dispatchEvent(new Event('change', { bubbles: true }))
+      zone.focus()
     })
     return
   }

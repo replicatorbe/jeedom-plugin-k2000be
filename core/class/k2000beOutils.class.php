@@ -16,8 +16,8 @@
  */
 
 /*
- * Les huit outils que le modèle peut demander, et ce que le plugin accepte d'y
- * répondre.
+ * Les outils que le modèle peut demander — dix, onze avec la levée de doute —
+ * et ce que le plugin accepte d'y répondre.
  *
  * C'est la frontière du plugin : tout ce qui part chez OpenAI sort d'ici, et
  * tout ce que le modèle réclame y entre. Trois règles la gouvernent.
@@ -134,6 +134,28 @@ class k2000beOutils {
 
     const RESUME_PIECES = 12;
 
+    /* La raison d'une action, bornée : une phrase, pas un exposé. */
+    const RAISON_MAX = 200;
+
+    /*
+     * Les statistiques : une heure par défaut, trente jours au plus — la
+     * profondeur d'historique d'une box ordinaire, et au-delà de ce qu'une
+     * comparaison « par rapport à d'habitude » demande. Trente et une
+     * moyennes journalières au plus.
+     */
+    const STATISTIQUES_HEURES = 24;
+    const STATISTIQUES_HEURES_MAX = 720;
+    const STATISTIQUES_JOURS_MAX = 31;
+
+    /* La météo : deux équipements au plus, quatre-vingts états chacun. Un
+     * plugin de prévisions en porte facilement soixante-dix-sept — celui de
+     * l'IRM, mesuré —, dont des bulletins entiers, abrégés comme toute valeur.
+     * À soixante, les prévisions heure par heure, rangées en dernier,
+     * tombaient : ce sont elles qui décident de fermer un volet avant
+     * l'averse. */
+    const METEO_EQUIPEMENTS_MAX = 2;
+    const METEO_ETATS_MAX = 80;
+
     /* Longueur d'une valeur d'état recopiée. Une commande peut contenir un
      * JSON de plusieurs kilo-octets (une prévision météo, une liste de
      * titres) : la recopier entière ferait exploser la facture. */
@@ -216,6 +238,27 @@ class k2000beOutils {
     /* Ce qui a déjà été attendu dans cette demande. Remis à zéro par
      * nouvelleDemande(), au début de chaque tour. */
     private static $attenteCumulee = 0.0;
+
+    /*
+     * Une commande est-elle partie dans ce tour ?
+     *
+     * L'attente n'a de sens qu'après une action : c'est elle qui fait remonter
+     * un état neuf. Sur une simple consultation, la valeur en cache est déjà
+     * la bonne, et attendre ne fait qu'attendre. Or le modèle passait « wait »
+     * à toutes ses lectures — l'invite lui répète de vérifier, il vérifie tout
+     * — et chaque question sur la température coûtait cinq secondes pour
+     * rien : de douze à quinze secondes la demande, dans le journal réel.
+     * L'attente n'est donc accordée qu'une fois qu'une commande est réellement
+     * partie, et le modèle apprend pourquoi elle ne l'a pas été.
+     */
+    private static $envoiDansLeTour = false;
+
+    /*
+     * Le réglage d'autonomie quand personne n'a parlé, ou null quand un
+     * humain attend la réponse. Posé par nouvelleDemande() au début du tour :
+     * c'est la boucle qui sait d'où vient la demande, pas cette classe.
+     */
+    private static $autonomie = null;
 
     /* Mémoire d'un appel : la liste des commandes est relue par presque tous
      * les outils, et la conversation en enchaîne plusieurs. */
@@ -300,8 +343,19 @@ class k2000beOutils {
                     'room' => array('type' => 'string', 'description' => 'Restrict to a room, by name. Partial and accent-insensitive.'),
                 ), array()),
 
+            self::outil('get_statistics',
+                'Summarise one recorded state over a period, computed by the plugin: minimum, maximum, average, first and last value, the change between them and the trend, plus one average per day when the period spans several days. For an on/off state: how often it changed and the share of time it spent on. Use it for "is it warmer than usual", "how much did we use this week", "is the humidity going down" — instead of reading points with get_history and doing the arithmetic yourself.',
+                array(
+                    'command_id' => array('type' => 'integer', 'description' => 'State command identifier. Only works on states Jeedom records history for.'),
+                    'hours' => array('type' => 'integer', 'description' => 'How far back to look, in hours. Default 24, maximum 720 (thirty days).'),
+                ), array('command_id')),
+
+            self::outil('get_weather',
+                'Read the weather devices of the home in one call: current conditions, forecasts, rain, warnings — every state they expose that you may read. Call it before deciding anything the weather changes: shutters, heating, watering, a reminder to take an umbrella.',
+                array(), array()),
+
             self::outil('execute_command',
-                'Ask the plugin to run one action command. The plugin decides: it may run it, ask the user to confirm it, or refuse it. A refusal is a house rule, not a failure — report it plainly to the user and do not retry. A command that was sent is not a command that worked: check with get_states, passing wait: 3 to 5, before saying it is done. Independent actions belong in the same message: they then run in one round trip.',
+                'Ask the plugin to run one action command. The plugin decides: it may run it, ask the user to confirm it, or refuse it. A refusal is a house rule, not a failure — report it plainly to the user and do not retry. A command that was sent is not a command that worked: check with get_states, passing wait: 3 to 5, before saying it is done. Independent actions belong in the same message: they then run in one round trip. Always say why in "reason": it is kept in the log and shown to whoever has to confirm.',
                 array(
                     'command_id' => array('type' => 'integer', 'description' => 'Action command identifier, as returned by get_equipment.'),
                     /*
@@ -314,7 +368,8 @@ class k2000beOutils {
                      */
                     'value' => array('type' => 'string', 'description' => 'The value itself, when the action announces one in its "expects" field: the number for "number", one of the listed choices for "choice", #rrggbb or #rgb for "color", the text to send for "message". Never send the word "number", "choice", "color" or "message" itself. Leave it out for a plain button.'),
                     'title' => array('type' => 'string', 'description' => 'Only for an action whose "expects" is "message": the short title of the notification. The body goes in value.'),
-                ), array('command_id')),
+                    'reason' => array('type' => 'string', 'description' => 'Why you run this command, in one short French sentence, citing what you read: « l\'humidité du bureau est à 68 % depuis trois heures ». Required when nobody asked you anything — a routine, a trigger or an alert woke you up.'),
+                ), array('command_id', 'reason')),
         );
 
         /*
@@ -391,6 +446,10 @@ class k2000beOutils {
                     return self::getHistory($arguments);
                 case 'get_events':
                     return self::evenements($arguments);
+                case 'get_statistics':
+                    return self::statistiques($arguments);
+                case 'get_weather':
+                    return self::meteo();
                 case 'check_alert':
                     return self::verdict($arguments, $_eqLogic);
                 case 'execute_command':
@@ -423,7 +482,11 @@ class k2000beOutils {
             $demande = is_array($_demande) ? $_demande : array();
             $id = isset($demande['command_id']) ? (int) $demande['command_id'] : 0;
             $valeur = isset($demande['valeur']) ? $demande['valeur'] : null;
-            return self::appliquer(k2000beSecurite::controler($id, $valeur), true);
+            /* Pas d'autonomie ici : quelqu'un vient de confirmer, un humain
+             * a donc parlé, et c'est précisément ce que la confirmation
+             * attendait. La raison suit la commande jusqu'au journal. */
+            $raison = isset($demande['raison']) ? (string) $demande['raison'] : '';
+            return self::appliquer(k2000beSecurite::controler($id, $valeur), true, null, $raison);
         } catch (Throwable $e) {
             return self::erreur('execute_command', k2000beJournal::masquer($e->getMessage()));
         }
@@ -669,7 +732,7 @@ class k2000beOutils {
          * budget d'attente une lecture qui n'aura pas lieu.
          */
         $demandee = (int) self::argument($_arguments, 'wait', 0);
-        $accordee = self::attenteAccordee($demandee);
+        $accordee = self::$envoiDansLeTour ? self::attenteAccordee($demandee) : 0.0;
         $attendu = 0.0;
         $rafraichis = array();
         if ($accordee > 0 && !empty($lisibles)) {
@@ -728,7 +791,9 @@ class k2000beOutils {
         /* Les notes, elles, n'ont de sens que s'il y avait quelque chose à
          * attendre : sans état lisible, « not_available » dit déjà tout. */
         if ($demandee > 0 && !empty($lisibles)) {
-            if ($accordee <= 0) {
+            if (!self::$envoiDansLeTour) {
+                $notes[] = 'Nothing was waited for: no command has been sent in this request, so the values above are already current. Pass "wait" only right after execute_command.';
+            } elseif ($accordee <= 0) {
                 $notes[] = 'Nothing was waited for: the waiting budget of this request ('
                     . self::ATTENTE_CUMUL_MAX . ' s in total) is spent. Read again in a later turn if a value still looks old.';
             } else {
@@ -874,8 +939,13 @@ class k2000beOutils {
      * même processus verrait sinon la seconde demande privée d'attente parce que
      * la première a dépensé le budget.
      */
-    public static function nouvelleDemande() {
+    public static function nouvelleDemande($_dejaEnvoye = false, $_autonomie = null) {
         self::$attenteCumulee = 0.0;
+        /* Un tour qui reprend après une confirmation a déjà envoyé sa
+         * commande avant de commencer : la vérification qui suit doit pouvoir
+         * attendre. */
+        self::$envoiDansLeTour = (bool) $_dejaEnvoye;
+        self::$autonomie = ($_autonomie === null) ? null : k2000beSecurite::autonomie($_autonomie);
     }
 
     private static function rechercher($_arguments) {
@@ -1576,6 +1646,283 @@ class k2000beOutils {
     }
 
     /*
+     * Le résumé d'un état sur une période, calculé ici.
+     *
+     * get_history rend des points, et c'est au modèle de faire le calcul.
+     * Il le fait mal, et il le fait cher : cinquante points pour en tirer une
+     * moyenne, recopiés dans la conversation et repayés à chaque tour, et une
+     * moyenne de tête qui se trompe d'un degré sur trente valeurs. « Fait-il
+     * plus chaud que d'habitude ? » ne demande pas cinquante points, mais
+     * quatre chiffres et une tendance.
+     *
+     * Les mêmes contrôles que get_history, dans le même ordre : sans droit de
+     * lecture, rien — pas même le nom.
+     *
+     * Pour une mesure, le cœur fait le gros du travail : trois lectures
+     * groupées à l'heure, une par fonction. C'est ce qui rend le minimum et le
+     * maximum EXACTS — le plus petit des minimums horaires est le minimum —
+     * là où les tirer de moyennes horaires les aurait écrêtés. Trois requêtes
+     * de sept cents lignes au plus valent mieux qu'une de quarante mille.
+     */
+    private static function statistiques($_arguments) {
+        $id = (int) self::argument($_arguments, 'command_id', 0);
+        $heures = (int) self::argument($_arguments, 'hours', self::STATISTIQUES_HEURES);
+        if ($heures < 1) {
+            $heures = self::STATISTIQUES_HEURES;
+        }
+        if ($heures > self::STATISTIQUES_HEURES_MAX) {
+            $heures = self::STATISTIQUES_HEURES_MAX;
+        }
+
+        $cmd = ($id > 0) ? self::commande($id) : null;
+        $visibles = self::equipementsVisibles();
+        $eqId = is_object($cmd) ? (int) $cmd->getEqLogic_id() : 0;
+        $eqLogic = isset($visibles[$eqId]) ? $visibles[$eqId] : null;
+        if (!is_object($cmd) || !is_object($eqLogic) || !k2000beSecurite::lisible($cmd, $eqLogic)) {
+            return self::erreur('get_statistics', __('Cet historique n\'est pas accessible à l\'assistant.', __FILE__));
+        }
+        $titre = k2000beSecurite::titre($cmd);
+        if ((int) $cmd->getIsHistorized() !== 1) {
+            return self::rendu('get_statistics',
+                array('status' => 'no_history', 'reason' => 'Jeedom does not record history for this state. Only its current value is available, through get_states.'),
+                $titre, 'erreur', __('Cet état n\'est pas historisé dans Jeedom.', __FILE__));
+        }
+        if (!class_exists('history')) {
+            return self::erreur('get_statistics', __('L\'historique n\'est pas disponible sur cette installation.', __FILE__));
+        }
+
+        $debut = date('Y-m-d H:i:s', time() - $heures * 3600);
+        $fin = date('Y-m-d H:i:s');
+        $resultat = array('command' => $titre, 'hours' => $heures);
+        $unite = trim((string) $cmd->getUnite());
+        if ($unite !== '') {
+            $resultat['unit'] = $unite;
+        }
+        $maintenant = self::valeur($cmd);
+        if ($maintenant !== null) {
+            $resultat['now'] = $maintenant;
+        }
+
+        if ((string) $cmd->getSubType() === 'numeric') {
+            $stats = self::statistiquesMesure($id, $debut, $fin, $heures);
+        } else {
+            $stats = self::statistiquesEtat($id, $debut, $fin, $heures, (string) $cmd->getSubType() === 'binary');
+        }
+        if ($stats === null) {
+            $resultat['status'] = 'no_data';
+            $resultat['note'] = 'Nothing was recorded for this state during that period. That says nothing about the home itself: the device may simply have been silent.';
+            return self::rendu('get_statistics', $resultat, $titre, 'ok',
+                sprintf(__('Aucun relevé sur %d heure(s).', __FILE__), $heures));
+        }
+
+        $resultat = array_merge($resultat, $stats);
+        return self::rendu('get_statistics', $resultat, $titre, 'ok',
+            sprintf(__('Statistiques sur %d heure(s).', __FILE__), $heures));
+    }
+
+    /* Une mesure : minimum, maximum, moyenne, premier et dernier seau, la
+     * tendance, et une moyenne par jour quand la période en couvre plusieurs.
+     * null quand rien n'a été relevé. */
+    private static function statistiquesMesure($_id, $_debut, $_fin, $_heures) {
+        $moyennes = self::valeursNumeriques(history::all($_id, $_debut, $_fin, 'avg::hour'));
+        if (count($moyennes) === 0) {
+            return null;
+        }
+        $minimums = self::valeursNumeriques(history::all($_id, $_debut, $_fin, 'min::hour'));
+        $maximums = self::valeursNumeriques(history::all($_id, $_debut, $_fin, 'max::hour'));
+
+        $valeurs = array_column($moyennes, 'v');
+        $min = (count($minimums) > 0) ? min(array_column($minimums, 'v')) : min($valeurs);
+        $max = (count($maximums) > 0) ? max(array_column($maximums, 'v')) : max($valeurs);
+        $premier = $moyennes[0];
+        $dernier = $moyennes[count($moyennes) - 1];
+
+        $stats = array(
+            'min'     => round($min, 2),
+            'max'     => round($max, 2),
+            'average' => round(array_sum($valeurs) / count($valeurs), 2),
+            'first'   => array('t' => $premier['t'], 'v' => round($premier['v'], 2)),
+            'last'    => array('t' => $dernier['t'], 'v' => round($dernier['v'], 2)),
+            'change'  => round($dernier['v'] - $premier['v'], 2),
+            'trend'   => self::tendance($valeurs, $max - $min),
+            'buckets' => count($moyennes),
+        );
+
+        if ($_heures > 48) {
+            $jours = self::valeursNumeriques(history::all($_id, $_debut, $_fin, 'avg::day'));
+            $jours = array_slice($jours, -self::STATISTIQUES_JOURS_MAX);
+            $parJour = array();
+            foreach ($jours as $jour) {
+                $parJour[] = array('day' => substr($jour['t'], 0, 10), 'avg' => round($jour['v'], 2));
+            }
+            if (count($parJour) > 0) {
+                $stats['by_day'] = $parJour;
+            }
+        }
+        $stats['note'] = 'Computed by the plugin from hourly buckets: "average" is the mean of the hourly averages, "first" and "last" are the first and last hourly averages, not single readings. "min" and "max" are exact. Quote these figures; do not recompute them.';
+        return $stats;
+    }
+
+    /*
+     * Rising, falling ou stable : le dernier quart de la période comparé au
+     * premier. Moins d'un dixième de l'amplitude d'écart, c'est stable — un
+     * capteur qui oscille d'un dixième de degré ne monte pas pour autant.
+     */
+    private static function tendance($_valeurs, $_amplitude) {
+        $nombre = count($_valeurs);
+        if ($nombre < 4 || $_amplitude <= 0) {
+            return 'stable';
+        }
+        $quart = max(1, (int) floor($nombre / 4));
+        $avant = array_sum(array_slice($_valeurs, 0, $quart)) / $quart;
+        $apres = array_sum(array_slice($_valeurs, -$quart)) / $quart;
+        if (abs($apres - $avant) < $_amplitude / 10) {
+            return 'stable';
+        }
+        return ($apres > $avant) ? 'rising' : 'falling';
+    }
+
+    /* Les points rendus par le cœur, réduits à ce qui est un nombre. */
+    private static function valeursNumeriques($_lignes) {
+        $points = array();
+        if (!is_array($_lignes)) {
+            return $points;
+        }
+        foreach ($_lignes as $ligne) {
+            $valeur = $ligne->getValue();
+            if (!is_numeric($valeur)) {
+                continue;
+            }
+            $points[] = array('t' => self::dateCourte($ligne->getDatetime()), 'v' => (float) $valeur);
+        }
+        return $points;
+    }
+
+    /*
+     * Un état : combien de fois il a changé, quand pour la dernière fois, et
+     * — pour un binaire — la part du temps passée à 1.
+     *
+     * La valeur d'avant la fenêtre est demandée au cœur : sans elle, une porte
+     * restée ouverte toute la journée et jamais refermée n'aurait aucun point
+     * dans la fenêtre, et compterait zéro minute d'ouverture.
+     */
+    private static function statistiquesEtat($_id, $_debut, $_fin, $_heures, $_binaire) {
+        $lignes = history::all($_id, $_debut, $_fin, null, true);
+        if (!is_array($lignes) || count($lignes) === 0) {
+            return null;
+        }
+        $debut = strtotime($_debut);
+        $fin = strtotime($_fin);
+        $changements = 0;
+        $dernierChangement = '';
+        $precedente = null;
+        $actif = 0;
+        $instant = $debut;
+        $compte = array();
+        foreach ($lignes as $ligne) {
+            $valeur = (string) $ligne->getValue();
+            $quand = max($debut, (int) strtotime($ligne->getDatetime()));
+            if ($precedente !== null && $precedente === '1') {
+                $actif += max(0, $quand - $instant);
+            }
+            if ($precedente !== null && $valeur !== $precedente) {
+                $changements++;
+                $dernierChangement = self::dateCourte($ligne->getDatetime());
+            }
+            if (!isset($compte[$valeur])) {
+                $compte[$valeur] = 0;
+            }
+            $compte[$valeur]++;
+            $precedente = $valeur;
+            $instant = $quand;
+        }
+        if ($precedente === '1') {
+            $actif += max(0, $fin - $instant);
+        }
+
+        $stats = array('changes' => $changements);
+        if ($dernierChangement !== '') {
+            $stats['last_change'] = $dernierChangement;
+        }
+        if ($_binaire) {
+            $duree = max(1, $fin - $debut);
+            $stats['on_share'] = round($actif / $duree, 3);
+            $stats['on_minutes'] = (int) round($actif / 60);
+            $stats['note'] = 'on_share is the fraction of the period the state spent at 1, on_minutes the same in minutes. changes counts every switch, on and off.';
+        } else {
+            arsort($compte);
+            $stats['values'] = array_slice($compte, 0, 10, true);
+        }
+        return $stats;
+    }
+
+    /*
+     * La météo, d'un seul appel.
+     *
+     * Un équipement est un équipement météo s'il porte au moins un état de
+     * type générique WEATHER_* lisible — c'est le critère du cœur, pas le nom
+     * d'un plugin. Une fois reconnu, TOUS ses états lisibles sont rendus, avec
+     * ou sans type générique : les plugins de prévisions n'en posent que sur
+     * une partie, et c'est souvent l'autre — la vigilance, la pluie dans
+     * l'heure, le bulletin — qui décide.
+     */
+    private static function meteo() {
+        $stations = array();
+        foreach (self::equipementsVisibles() as $eqId => $eqLogic) {
+            $etats = array();
+            $meteo = false;
+            $total = 0;
+            foreach (self::commandesDe($eqId) as $cmd) {
+                if ($cmd->getType() !== 'info' || !k2000beSecurite::lisible($cmd, $eqLogic)) {
+                    continue;
+                }
+                if (strpos((string) $cmd->getGeneric_type(), 'WEATHER_') === 0) {
+                    $meteo = true;
+                }
+                $total++;
+                if (count($etats) >= self::METEO_ETATS_MAX) {
+                    continue;
+                }
+                $valeur = self::valeur($cmd);
+                if ($valeur === null || $valeur === '') {
+                    continue;
+                }
+                $ligne = array('name' => (string) $cmd->getName(), 'value' => $valeur);
+                $unite = trim((string) $cmd->getUnite());
+                if ($unite !== '') {
+                    $ligne['unit'] = $unite;
+                }
+                $etats[] = $ligne;
+            }
+            if (!$meteo) {
+                continue;
+            }
+            $station = array(
+                'device' => (string) $eqLogic->getName(),
+                'room'   => self::piece($eqLogic),
+                'states' => $etats,
+            );
+            if ($total > self::METEO_ETATS_MAX) {
+                $station['more_states'] = $total - self::METEO_ETATS_MAX;
+            }
+            $stations[] = $station;
+            if (count($stations) >= self::METEO_EQUIPEMENTS_MAX) {
+                break;
+            }
+        }
+
+        if (count($stations) === 0) {
+            return self::rendu('get_weather',
+                array('status' => 'no_weather', 'reason' => 'No weather device is visible to the assistant. Say so; do not guess the weather.'),
+                __('Météo', __FILE__), 'ok', __('Aucun équipement météo visible.', __FILE__));
+        }
+        return self::rendu('get_weather',
+            array('stations' => $stations, 'note' => 'Values as the weather device last reported them. Forecast names usually carry their horizon (H+1, J+1…). Long texts are cut.'),
+            __('Météo', __FILE__), 'ok',
+            sprintf(__('%d équipement(s) météo lus.', __FILE__), count($stations)));
+    }
+
+    /*
      * Un budget d'identifiants introuvables par conversation a été envisagé
      * ici, pour qu'un modèle ne puisse pas brûler ses dix appels d'outils à
      * énumérer des identifiants. Il n'y est pas, et c'est délibéré : cette
@@ -1614,7 +1961,33 @@ class k2000beOutils {
         if ($titre !== '' && !is_array($valeur) && self::attendUnMessage($id)) {
             $valeur = array('title' => $titre, 'message' => (string) $valeur);
         }
-        return self::appliquer(k2000beSecurite::controler($id, $valeur), false, $valeur);
+
+        /*
+         * La raison. Quand un humain a demandé, sa phrase en tient lieu, et
+         * elle est déjà au journal : on ne refuse pas « éteins le salon » pour
+         * une justification manquante. Quand personne n'a rien demandé, elle
+         * est la seule trace de ce qui a motivé l'action — et la seule chose
+         * que lira celui qui doit confirmer. Sans elle, rien ne part.
+         */
+        $raison = self::aplatir((string) self::argument($_arguments, 'reason', ''));
+        if ($raison === '' && self::$autonomie !== null) {
+            return self::rendu('execute_command',
+                array('status' => 'error', 'reason' => 'Nobody asked for this: an action you decide on your own must say why. Call execute_command again with "reason", one short sentence citing what you read.'),
+                __('Action sans raison', __FILE__), 'erreur',
+                __('Le modèle a voulu agir seul sans dire pourquoi : rien n\'est parti.', __FILE__));
+        }
+        if (mb_strlen($raison) > self::RAISON_MAX) {
+            $raison = mb_substr($raison, 0, self::RAISON_MAX - 1) . '…';
+        }
+
+        return self::appliquer(k2000beSecurite::controler($id, $valeur, self::$autonomie), false, $valeur, $raison);
+    }
+
+    /* Une raison tient sur une ligne : elle s'affiche dans une frise et dans
+     * une notification, pas dans un rapport. */
+    private static function aplatir($_texte) {
+        $plat = preg_replace('/\s+/u', ' ', $_texte);
+        return trim((string) (($plat === null) ? $_texte : $plat));
     }
 
     /*
@@ -1643,9 +2016,10 @@ class k2000beOutils {
      * k2000beSecurite::verdict(), qui explique pourquoi les deux diffèrent sur
      * un équipement masqué.
      */
-    private static function appliquer($_controle, $_confirme, $_valeurDemandee = null) {
+    private static function appliquer($_controle, $_confirme, $_valeurDemandee = null, $_raison = '') {
         $titre = $_controle['titre'];
         $motif = $_controle['motif'];
+        $raison = trim((string) $_raison);
 
         if ($_controle['decision'] === k2000beSecurite::POLITIQUE_REFUS) {
             /*
@@ -1664,9 +2038,9 @@ class k2000beOutils {
              */
             $titreModele = isset($_controle['titre_modele']) ? $_controle['titre_modele'] : $titre;
             $motifModele = isset($_controle['motif_modele']) ? $_controle['motif_modele'] : $motif;
-            return self::rendu('execute_command',
+            return self::avecRaison(self::rendu('execute_command',
                 array('status' => 'refused', 'command' => $titreModele, 'reason' => $motifModele),
-                $titre, 'refus', $motif);
+                $titre, 'refus', $motif), $raison);
         }
 
         if ($_controle['decision'] === k2000beSecurite::POLITIQUE_CONFIRMATION && !$_confirme) {
@@ -1675,15 +2049,16 @@ class k2000beOutils {
                 'titre'      => $titre,
                 'valeur'     => $_controle['valeur'],
                 'motif'      => $motif,
+                'raison'     => $raison,
             );
-            return self::rendu('execute_command',
+            return self::avecRaison(self::rendu('execute_command',
                 array(
                     'status'  => 'confirmation_required',
                     'command' => $titre,
                     'reason'  => $motif,
                     'next'    => 'Stop here. Do not call any other tool. Tell the user, in one sentence, what you are about to do and that you are waiting for their confirmation.',
                 ),
-                $titre, 'confirmation', $motif, $demande);
+                $titre, 'confirmation', $motif, $demande), $raison);
         }
 
         $cmd = $_controle['cmd'];
@@ -1710,7 +2085,7 @@ class k2000beOutils {
              * exactement le mensonge qu'il est censé éviter. Ce que
              * l'utilisateur voit, lui, dans la frise, c'est ce qui SERAIT
              * parti — de quoi éprouver ses autorisations sans rien risquer. */
-            return self::rendu('execute_command',
+            return self::avecRaison(self::rendu('execute_command',
                 array(
                     'status'  => 'simulated',
                     'command' => $titre,
@@ -1718,10 +2093,11 @@ class k2000beOutils {
                         . ($ignoree ? ' ' . self::NOTE_VALEUR_IGNOREE : ''),
                 ),
                 $titre, 'simule',
-                sprintf(__('Simulation : « %s » n\'est pas partie.', __FILE__), $titre));
+                sprintf(__('Simulation : « %s » n\'est pas partie.', __FILE__), $titre)), $raison);
         }
 
         $cmd->execCmd($options);
+        self::$envoiDansLeTour = true;
 
         /*
          * « sent » et non « done ». Jeedom rend la main dès que la commande
@@ -1736,14 +2112,23 @@ class k2000beOutils {
          * qui n'avait pas eu lieu : la consigne de vérifier produisait
          * exactement le mensonge qu'elle devait éviter.
          */
-        return self::rendu('execute_command',
+        return self::avecRaison(self::rendu('execute_command',
             array(
                 'status'  => 'sent',
                 'command' => $titre,
                 'note'    => 'The command was sent. This is not proof that it took effect: read the matching state with get_states, passing wait: 3 to 5, before telling the user it is done. Reading it straight away would show you the value from before the command.'
                     . ($ignoree ? ' ' . self::NOTE_VALEUR_IGNOREE : ''),
             ),
-            $titre, 'ok', sprintf(__('Commande envoyée : %s.', __FILE__), $titre));
+            $titre, 'ok', sprintf(__('Commande envoyée : %s.', __FILE__), $titre)), $raison);
+    }
+
+    /* La raison accompagne l'étape — frise, journal, notification — et ne
+     * repart pas au modèle : il vient de l'écrire. */
+    private static function avecRaison($_rendu, $_raison) {
+        if ($_raison !== '') {
+            $_rendu['etape']['raison'] = $_raison;
+        }
+        return $_rendu;
     }
 
     /* ================================================ RÉSUMÉ DE LA MAISON */

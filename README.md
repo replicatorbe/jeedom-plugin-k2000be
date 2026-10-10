@@ -63,6 +63,15 @@ Plugin privé : il n'est pas destiné au Market.
   la courbe, et le réglage *Demandes par jour* refuse au-delà d'un plafond,
   avant tout appel réseau — le garde-fou du scénario qui s'emballe, le plafond
   d'OpenAI étant mensuel et libellé en dollars.
+- **Il veille, et il prévient.** Des routines (une heure, une consigne), des
+  déclencheurs (un état qui franchit un seuil) et l'alerte automatique le
+  réveillent sans qu'on lui parle ; sa réponse part d'elle-même sur un
+  téléphone, sauf quand il n'a « RAS ». Quand personne n'a parlé, il propose
+  plutôt qu'il n'agit — c'est le réglage par défaut —, et chaque action qu'il
+  décide seul doit dire pourquoi, au journal.
+- **Il sait compter et regarder le ciel.** Un outil résume un état sur trente
+  jours — minimum, maximum, moyenne, tendance —, un autre lit la météo d'un
+  coup.
 - **Une page Santé** dit en un coup d'œil ce qui manque, et signale les
   commandes qui ouvrent, déverrouillent ou désarment sans demander.
 
