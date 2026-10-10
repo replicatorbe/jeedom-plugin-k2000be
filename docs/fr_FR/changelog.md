@@ -1,6 +1,6 @@
 # Changelog
 
-## Prochaine version
+## 0.2 — 24/09/2026
 
 - L'alerte automatique ne se joue plus dans le cron minute. Le cœur de Jeedom
   exécute les tâches minute de tous les plugins l'une après l'autre : une levée

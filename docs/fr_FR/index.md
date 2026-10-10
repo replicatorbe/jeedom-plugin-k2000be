@@ -674,7 +674,8 @@ plafond de dépense se règle dans votre compte OpenAI, et c'est là qu'il faut 
 mettre.
 
 Le coût par demande est affiché dans l'onglet *Historique*, jeton par jeton.
-Avec `gpt-4o-mini`, une demande ordinaire se compte en fractions de centime.
+Avec `gpt-6-luna`, le modèle par défaut, une demande ordinaire se compte en
+fractions de centime.
 Ce qui le fait monter :
 
 - **une maison très fournie** : plus il y a de pièces et d'équipements visibles,
@@ -692,7 +693,7 @@ Ce qui le fait monter :
 - **le résumé de la maison** joint à l'invite système, s'il est activé : il
   repart à chaque demande ;
 - **le modèle choisi**, qui pèse plus lourd que tout le reste. Un modèle
-  haut de gamme peut coûter vingt fois `gpt-4o-mini` pour un résultat
+  haut de gamme peut coûter vingt fois `gpt-6-luna` pour un résultat
   comparable sur ce genre de tâche.
 
 Le bouton **Nouvelle conversation** vide la mémoire : c'est aussi un geste
@@ -1111,7 +1112,7 @@ Dans *Configuration* (la clé à molette de la page du plugin).
 | Réglage | Défaut | À quoi ça sert |
 |---|---|---|
 | Clé API OpenAI | vide | indispensable. Chiffrée en base, masquée dans les journaux, mais relisible depuis l'interface — voir ci-dessous |
-| Modèle | `gpt-4o-mini` | le moins cher qui tienne correctement les outils |
+| Modèle | `gpt-6-luna` | le petit modèle actuel d'OpenAI, qui tient correctement les outils |
 | Délai d'attente | 60 s | par appel HTTP, **entre 5 et 300 secondes**. Une demande complexe en enchaîne plusieurs |
 | Longueur maximale d'une réponse | 1200 jetons | au-delà, la réponse est coupée et la demande se termine en `LIMIT`. **`0` veut dire « pas de plafond »** : c'est le seul champ de la page où zéro est un choix et non une saisie de travers |
 | Outils par demande | 15 | le garde-fou de coût, **30 au plus**. Plus bas, l'assistant conclut vite et mal — « je vais me coucher » en dépense douze à dix-huit ; plus haut, il fouille et la facture suit |
